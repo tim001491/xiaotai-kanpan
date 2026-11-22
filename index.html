@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小台看盤・開根號關鍵價位</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#2a2f3a; --text:#e6e6e6; --dim:#8b93a3; --up:#ef4444; --down:#22c55e; --gold:#f5b942; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif; }
+  header { padding:12px 14px 6px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; }
+  .ver { font-size:11px; color:var(--dim); }
+  .price { font-size:22px; font-weight:700; }
+  .chg { font-size:14px; }
+  .bar { display:flex; gap:6px; padding:4px 14px 8px; flex-wrap:wrap; }
+  .bar button { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:6px 14px; font-size:15px; }
+  .bar button.on { background:var(--gold); color:#111; border-color:var(--gold); font-weight:700; }
+  #chart { height:52vh; min-height:300px; }
+  #vol { height:16vh; min-height:110px; }
+  .levels { padding:10px 14px; }
+  .lv { display:flex; justify-content:space-between; align-items:center; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+  .lv b { font-size:18px; }
+  .tag { font-size:13px; padding:2px 8px; border-radius:6px; margin-right:8px; }
+  .res { background:rgba(239,68,68,.15); color:var(--up); }
+  .sup { background:rgba(34,197,94,.15); color:var(--down); }
+  .sub { font-size:12px; color:var(--dim); margin-top:2px; }
+  .note { font-size:12px; color:var(--dim); padding:0 14px 20px; line-height:1.6; }
+  .msg { padding:30px 14px; color:var(--dim); text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>小台看盤</h1><span class="ver">v1</span>
+  <span class="price" id="last">—</span><span class="chg" id="chg"></span>
+</header>
+<div class="bar" id="periods">
+  <button data-p="D" class="on">日K</button><button data-p="W">週K</button><button data-p="M">月K</button>
+</div>
+<div id="chart"></div>
+<div id="vol"></div>
+<div class="levels" id="levels"><div class="msg" id="msg">載入期交所資料中…</div></div>
+<div class="note" id="note">資料來源：臺灣期貨交易所每日交易行情（一般交易時段，連續近月）。收盤後更新，非盤中即時。關鍵價位＝√(轉折點A × 轉折點B)，由最新一根往左找轉折。</div>
+
+<script>
+const UP = '#ef4444', DOWN = '#22c55e';
+let daily = [], period = 'D', chart, volChart, candle, volume, priceLines = [];
+
+// ── 週／月 K 合成 ──
+function group(bars, p) {
+  if (p === 'D') return bars;
+  const key = t => {
+    const d = new Date(t + 'T00:00:00Z');
+    if (p === 'M') return t.slice(0, 7);
+    const day = (d.getUTCDay() + 6) % 7;            // 週一為一週開始
+    d.setUTCDate(d.getUTCDate() - day);
+    return d.toISOString().slice(0, 10);
+  };
+  const out = [];
+  for (const b of bars) {
+    const k = key(b.time), last = out[out.length - 1];
+    if (last && last._k === k) {
+      last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low);
+      last.close = b.close; last.volume += b.volume;
+    } else out.push({ _k: k, time: b.time, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
+  }
+  return out;
+}
+
+// ── 轉折點：由右往左，高低點交替 ──
+function turningPoints(bars, k = 3) {
+  const pts = [];
+  for (let i = bars.length - 2; i >= 1; i--) {
+    const lo = Math.max(0, i - k), hi = Math.min(bars.length - 1, i + k);
+    let isH = true, isL = true;
+    for (let j = lo; j <= hi; j++) {
+      if (j === i) continue;
+      if (bars[j].high > bars[i].high) isH = false;
+      if (bars[j].low < bars[i].low) isL = false;
+    }
+    if (isH) pts.push({ i, type: 'H', price: bars[i].high });
+    if (isL) pts.push({ i, type: 'L', price: bars[i].low });
+  }
+  // 同類連續只留最極端的
+  const alt = [];
+  for (const p of pts) {
+    const last = alt[alt.length - 1];
+    if (last && last.type === p.type) {
+      if ((p.type === 'H' && p.price > last.price) || (p.type === 'L' && p.price < last.price)) alt[alt.length - 1] = p;
+    } else alt.push(p);
+  }
+  return alt; // alt[0] 是最新的轉折
+}
+
+function keyLevels(bars) {
+  const tp = turningPoints(bars);
+  const close = bars[bars.length - 1].close;
+  const lv = [];
+  for (let n = 0; n + 1 < tp.length && lv.length < 2; n++) {
+    const a = tp[n + 1], b = tp[n];                  // a 較舊、b 較新
+    const v = Math.sqrt(a.price * b.price);
+    lv.push({ v, a, b, kind: v >= close ? '壓力' : '支撐／停損' });
+  }
+  return lv;
+}
+
+function fmtDate(t) { return t.replace(/-/g, '/'); }
+
+function render() {
+  const bars = group(daily, period);
+  if (!bars.length) return;
+  candle.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+  volume.setData(bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? UP : DOWN })));
+
+  priceLines.forEach(l => candle.removePriceLine(l)); priceLines = [];
+  const lv = keyLevels(bars);
+  const markers = [];
+  const box = document.getElementById('levels');
+  box.innerHTML = '';
+  lv.forEach((l, idx) => {
+    const res = l.kind === '壓力';
+    priceLines.push(candle.createPriceLine({ price: l.v, color: res ? UP : DOWN, lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: l.kind }));
+    const nums = idx === 0 ? ['①', '②'] : ['③', '④'];
+    [[l.a, nums[0]], [l.b, nums[1]]].forEach(([p, s]) => markers.push({
+      time: bars[p.i].time, position: p.type === 'H' ? 'aboveBar' : 'belowBar',
+      color: '#f5b942', shape: p.type === 'H' ? 'arrowDown' : 'arrowUp', text: s }));
+    box.insertAdjacentHTML('beforeend', `<div class="lv"><div><span class="tag ${res ? 'res' : 'sup'}">${l.kind}</span><b>${l.v.toFixed(2)}</b>
+      <div class="sub">√(${l.a.price} × ${l.b.price})　${nums[0]} ${fmtDate(bars[l.a.i].time)}　${nums[1]} ${fmtDate(bars[l.b.i].time)}</div></div></div>`);
+  });
+  markers.sort((x, y) => x.time < y.time ? -1 : 1);
+  candle.setMarkers(markers);
+  if (!lv.length) box.innerHTML = '<div class="msg">轉折點不夠，算不出關鍵價位</div>';
+
+  const last = bars[bars.length - 1], prev = bars[bars.length - 2];
+  document.getElementById('last').textContent = last.close;
+  if (prev) {
+    const d = last.close - prev.close, el = document.getElementById('chg');
+    el.textContent = `${d >= 0 ? '▲' : '▼'} ${Math.abs(d)} (${(d / prev.close * 100).toFixed(2)}%)`;
+    el.style.color = d >= 0 ? UP : DOWN;
+  }
+  const n = period === 'D' ? 120 : period === 'W' ? 80 : 40;
+  chart.timeScale().setVisibleLogicalRange({ from: bars.length - n, to: bars.length + 2 });
+}
+
+function makeCharts() {
+  const opt = { layout: { background: { color: '#0f1115' }, textColor: '#8b93a3' },
+    grid: { vertLines: { color: '#1c2029' }, horzLines: { color: '#1c2029' } },
+    timeScale: { borderColor: '#2a2f3a' }, rightPriceScale: { borderColor: '#2a2f3a', minimumWidth: 70 },
+    crosshair: { mode: 0 }, localization: { locale: 'zh-TW', dateFormat: 'yyyy/MM/dd' } };
+  chart = LightweightCharts.createChart(document.getElementById('chart'), opt);
+  candle = chart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN });
+  volChart = LightweightCharts.createChart(document.getElementById('vol'), { ...opt, timeScale: { ...opt.timeScale, visible: false } });
+  volume = volChart.addHistogramSeries({ priceFormat: { type: 'volume' } });
+  // 兩張圖同步捲動
+  let lock = false;
+  const sync = (src, dst) => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    if (lock || !r) return; lock = true; dst.timeScale().setVisibleLogicalRange(r); lock = false; });
+  sync(chart, volChart); sync(volChart, chart);
+  const resize = () => { chart.applyOptions({ width: innerWidth }); volChart.applyOptions({ width: innerWidth }); };
+  addEventListener('resize', resize); resize();
+}
+
+document.getElementById('periods').addEventListener('click', e => {
+  const p = e.target.dataset.p; if (!p) return;
+  period = p;
+  document.querySelectorAll('#periods button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  render();
+});
+
+async function load() {
+  makeCharts();
+  try {
+    const res = await fetch('/api/mtx?months=36');
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    daily = data.bars;
+    const last = daily[daily.length - 1];
+    document.getElementById('note').insertAdjacentHTML('afterbegin', `最新資料：${fmtDate(last.time)}（合約 ${last.contract}）<br>`);
+    render();
+  } catch (e) {
+    document.getElementById('levels').innerHTML = `<div class="msg">抓不到資料：${e.message}<br>請稍後重新整理</div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>
