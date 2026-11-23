@@ -29,7 +29,7 @@
   .zoom button{width:40px;height:40px;padding:0;font-size:22px;line-height:1;border-radius:10px;background:rgba(23,26,33,.85);border:1px solid var(--line);color:var(--text)}
   .zoom button:active{background:#2a2f3a}
   .sub{position:relative;margin-top:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  #volChart{height:110px} #macdChart{height:150px}
+  #volChart{height:110px} #macdChart{height:130px} #kdChart{height:140px}
   .sub .tag{position:absolute;left:8px;top:4px;z-index:3;font-size:11px;color:var(--mute);pointer-events:none;font-variant-numeric:tabular-nums}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
   .card h2{font-size:13px;margin:0 0 8px;color:var(--mute);font-weight:600;letter-spacing:.03em}
@@ -64,12 +64,12 @@
   .card.fold.open > h2::after { content: '收起'; }
   .card.fold > .card-body { display: none; margin-top: 10px; }
   .card.fold.open > .card-body { display: block; }
-  #chart, #volChart, #macdChart { touch-action: pan-y; }
+  #chart, #volChart, #macdChart, #kdChart { touch-action: pan-y; }
 </style>
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v19</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v20</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -110,6 +110,7 @@
     </div>
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
+    <div class="sub"><div class="tag" id="kdTag">KD (9,3,3)</div><div id="kdChart"></div><div class="vlayer" id="vlKd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
       <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(最新高點 × 之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(最新低點 × 之後往右的最高點)，低點就在最新那根K 時用那根K 的最高點，之後有更高點就跟著換。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
@@ -451,12 +452,17 @@
   });
   const volChart = LWC.createChart($('volChart'), subOpts(false));
   const volSeries = volChart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: true });
-  const macdChart = LWC.createChart($('macdChart'), subOpts(true));
+  const macdChart = LWC.createChart($('macdChart'), subOpts(false));
   const oscSeries = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
   const difSeries = macdChart.addLineSeries({ color: '#f0b90b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
   const deaSeries = macdChart.addLineSeries({ color: '#3d8bfd', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  // KD (9,3,3)：K 橘、D 藍，80 超買、20 超賣
+  const kdChart = LWC.createChart($('kdChart'), { ...subOpts(true), rightPriceScale: { borderColor: '#262b36', minimumWidth: 80, scaleMargins: { top: 0.18, bottom: 0.06 } } });
+  const kSeries = kdChart.addLineSeries({ color: '#f0b90b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) });
+  const dSeries = kdChart.addLineSeries({ color: '#3d8bfd', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+  [80, 50, 20].forEach(v => kSeries.createPriceLine({ price: v, color: v === 50 ? '#3a4150' : v === 80 ? '#ea394388' : '#16c78488', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '' }));
   {
-    const charts = [chart, volChart, macdChart];
+    const charts = [chart, volChart, macdChart, kdChart];
     let syncing = false;
     charts.forEach(src => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
       if (syncing || !r) return;
@@ -467,7 +473,7 @@
   }
   const UP = '#ea3943', DN = '#16c784';
   {
-    const pairs = [[chart, series, i => candles[i].close], [volChart, volSeries, i => candles[i].volume || 0], [macdChart, difSeries, i => macdCalc()[i].dif]];
+    const pairs = [[chart, series, i => candles[i].close], [volChart, volSeries, i => candles[i].volume || 0], [macdChart, difSeries, i => macdCalc()[i].dif], [kdChart, kSeries, i => kdCalc()[i].k]];
     let syncing = false;
     pairs.forEach(([src]) => src.subscribeCrosshairMove(p => {
       if (syncing) return;
@@ -494,6 +500,18 @@
     });
     return out;
   }
+  // 台灣常用 KD：RSV＝(收－9根最低)/(9根最高－9根最低)×100；K＝2/3 前K＋1/3 RSV；D＝2/3 前D＋1/3 K；起始 50
+  function kdCalc() {
+    const out = []; let K = 50, D = 50;
+    candles.forEach((c, i) => {
+      let hi = -Infinity, lo = Infinity;
+      for (let j = Math.max(0, i - 8); j <= i; j++) { if (candles[j].high > hi) hi = candles[j].high; if (candles[j].low < lo) lo = candles[j].low; }
+      const rsv = hi > lo ? (c.close - lo) / (hi - lo) * 100 : 50;
+      K = K * 2 / 3 + rsv / 3; D = D * 2 / 3 + K / 3;
+      out.push({ time: c.time, k: K, d: D });
+    });
+    return out;
+  }
   const oscColor = (m, prev) => m.osc >= 0 ? (prev && m.osc < prev.osc ? UP + '80' : UP) : (prev && m.osc > prev.osc ? DN + '80' : DN);
   const fmtVol = v => v >= 1e4 ? (v / 1e4).toFixed(2) + '萬' : String(Math.round(v));
   let hoverIdx = null;
@@ -502,6 +520,8 @@
     const c = candles[i];
     const m = i === candles.length - 1 && mLast ? mLast : macdCalc()[i];
     if (c) $('volTag').innerHTML = `成交量 <span style="color:${c.close >= c.open ? UP : DN}">${fmtVol(c.volume || 0)} 口</span>`;
+    const kd = kdCalc()[i];
+    if (kd) $('kdTag').innerHTML = `KD (9,3,3)　<span style="color:#f0b90b">K ${kd.k.toFixed(2)}</span>　<span style="color:#3d8bfd">D ${kd.d.toFixed(2)}</span>${kd.k >= 80 ? '　<span style="color:' + UP + '">超買</span>' : kd.k <= 20 ? '　<span style="color:' + DN + '">超賣</span>' : ''}`;
     if (m) $('macdTag').innerHTML = `MACD (12,26,9)　<span style="color:#f0b90b">DIF ${m.dif.toFixed(2)}</span>　<span style="color:#3d8bfd">DEA ${m.dea.toFixed(2)}</span>　<span style="color:${m.osc >= 0 ? UP : DN}">OSC ${m.osc.toFixed(2)}</span>`;
   }
   function setSubData() {
@@ -510,6 +530,9 @@
     oscSeries.setData(m.map((x, i) => ({ time: x.time, value: x.osc, color: oscColor(x, m[i - 1]) })));
     difSeries.setData(m.map(x => ({ time: x.time, value: x.dif })));
     deaSeries.setData(m.map(x => ({ time: x.time, value: x.dea })));
+    const kd = kdCalc();
+    kSeries.setData(kd.map(x => ({ time: x.time, value: x.k })));
+    dSeries.setData(kd.map(x => ({ time: x.time, value: x.d })));
     showSubTags(m.at(-1));
   }
   function updateSubData() {
@@ -519,6 +542,8 @@
     oscSeries.update({ time: x.time, value: x.osc, color: oscColor(x, m.at(-2)) });
     difSeries.update({ time: x.time, value: x.dif });
     deaSeries.update({ time: x.time, value: x.dea });
+    const kd = kdCalc().at(-1);
+    kSeries.update({ time: kd.time, value: kd.k }); dSeries.update({ time: kd.time, value: kd.d });
     showSubTags(x);
   }
 
@@ -595,7 +620,7 @@
     drawVMarks();
   }
   function drawVMarks() {
-    [[chart, 'vlMain', 28], [volChart, 'vlVol', 0], [macdChart, 'vlMacd', 28]].forEach(([c, id, axis]) => {
+    [[chart, 'vlMain', 28], [volChart, 'vlVol', 0], [macdChart, 'vlMacd', 0], [kdChart, 'vlKd', 28]].forEach(([c, id, axis]) => {
       const el = $(id); if (!el) return;
       el.style.bottom = axis + 'px';
       const ts = c.timeScale();
@@ -696,7 +721,7 @@
   let dailyGen = 0;
   async function rebuild() {
     const m = mins(), dly = isDaily(m);
-    [chart, volChart, macdChart].forEach(c => c.applyOptions({ timeScale: { timeVisible: !dly } }));
+    [chart, volChart, macdChart, kdChart].forEach(c => c.applyOptions({ timeScale: { timeVisible: !dly } }));
     if (dly) {
       const my = ++dailyGen;
       setConn(false, '載入日K…');
