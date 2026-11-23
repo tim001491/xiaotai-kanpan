@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v14</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v15</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -803,6 +803,7 @@
   function showChg(p, ref) {
     if (!(ref > 0)) return;
     const d = p - ref;
+    $('price').style.color = d > 0 ? UP : d < 0 ? DN : ''; // 台灣配色：比昨天收盤（參考價）漲＝紅、跌＝綠
     $('chg').innerHTML = `<span class="${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : ''}${Math.abs(d)}（${(d / ref * 100).toFixed(2)}%）</span>`;
   }
   function ticksToBars(R) {
@@ -1131,7 +1132,7 @@
   $('prod').onchange = () => {
     saveBars(); saveSettings();
     curBarsKey = barsKey(); bars1m = store.get(curBarsKey, []); dayQuote = store.get(dqKey(), null); baseSym = null; lastPrice = null;
-    $('price').textContent = '--'; $('chg').textContent = '';
+    $('price').textContent = '--'; $('price').style.color = ''; $('chg').textContent = '';
     load();
   };
   ['lookback', 'step', 'count'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
