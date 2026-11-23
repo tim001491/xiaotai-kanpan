@@ -1,0 +1,27 @@
+name: 下載小台歷史分K
+
+on:
+  schedule:
+    - cron: '10 9 * * 1-5'   # 台灣時間 週一～五 17:10（日盤資料出來後）
+    - cron: '0 22 * * 1-5'   # 台灣時間 週二～六 06:00（夜盤資料出來後）
+  workflow_dispatch:          # 也可以在 GitHub 的 Actions 頁面手動按「Run workflow」
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 下載並整理
+        run: node scripts/fetch-ticks.mjs
+      - name: 存回專案
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet && echo "沒有新資料" || (git commit -m "更新小台歷史分K $(TZ=Asia/Taipei date +%F)" && git push)

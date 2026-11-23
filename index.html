@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v12</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v13</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -112,7 +112,7 @@
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
       <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
-    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 存在這支手機裡（網頁有開過才有）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
+    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
 
@@ -135,6 +135,9 @@
       </div>
       <div class="row">
         <label>每</label><input id="poll" type="number" min="1" max="30" value="1"><label>秒抓一次報價</label>
+      </div>
+      <div class="row">
+        <label>分K 載入過去</label><input id="pastDays" type="number" min="0" max="60" value="20"><label>天（期交所資料，0＝不載入）</label>
       </div>
     </div>
 
@@ -266,7 +269,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
-  const SETTING_IDS = ['prod','interval','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
+  const SETTING_IDS = ['prod','interval','pastDays','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
   const saved = store.get('mxf_settings', {});
   if (!saved.v10poll) { saved.poll = '1'; saved.v10poll = 1; store.set('mxf_settings', saved); } // 改成最快：每 1 秒
   SETTING_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; if ($(id).tagName === 'SELECT' && !$(id).value) $(id).selectedIndex = id === 'step' ? 1 : 0; });
@@ -302,7 +305,37 @@
   }
   // 「近月／次月」只看日盤 08:45–13:45 的K棒；「近全／次全」日夜盤都算
   const inDay = t => { const m = (t % 86400) / 60; return m >= 8 * 60 + 45 && m < 13 * 60 + 45; };
-  const viewBars = () => isFull() ? bars1m : bars1m.filter(b => inDay(b.time));
+  // 期交所每筆成交整理出來的歷史 1 分K（GitHub 每天自動更新到 data/1m/），跟手機自己記的合在一起
+  const past = { near: [], next: [] };
+  let pastLoaded = '';
+  function allBars() {
+    const p = past[isNext() ? 'next' : 'near'];
+    if (!p.length) return bars1m;
+    const m = new Map();
+    for (const b of bars1m) m.set(b.time, b);
+    for (const b of p) m.set(b.time, b);           // 過去的日子以期交所為準
+    const last = p.at(-1).time;
+    for (const b of bars1m) if (b.time > last) m.set(b.time, b); // 今天的用即時的
+    return [...m.values()].sort((a, b) => a.time - b.time);
+  }
+  const viewBars = () => isFull() ? allBars() : allBars().filter(b => inDay(b.time));
+  async function loadPast() {
+    const n = Math.max(0, Math.min(60, +$('pastDays').value || 0));
+    const key = n + '';
+    if (pastLoaded === key) return false;
+    pastLoaded = key; past.near = []; past.next = [];
+    if (!n) return true;
+    try {
+      const idx = await (await fetch('/data/1m/index.json', { cache: 'no-cache' })).json();
+      const dates = (idx.dates || []).slice(-n);
+      const days = await Promise.all(dates.map(d => fetch(`/data/1m/${d}.json`).then(r => r.ok ? r.json() : null).catch(() => null)));
+      const conv = a => a.map(([t, o, h, l, c, v]) => ({ time: t, open: o, high: h, low: l, close: c, volume: v }));
+      for (const d of days) { if (!d) continue; if (d.near) past.near.push(...conv(d.near.bars)); if (d.next) past.next.push(...conv(d.next.bars)); }
+      past.near.sort((a, b) => a.time - b.time); past.next.sort((a, b) => a.time - b.time);
+      if (dates.length) addLog(`📥 載入期交所歷史分K：${dates[0]} ～ ${dates.at(-1)}（${dates.length} 天）`);
+    } catch { pastLoaded = ''; }
+    return true;
+  }
   function agg(arr, mins) {
     const out = [];
     for (const b of arr) {
@@ -800,6 +833,7 @@
     rebuild();
     setConn(false, '連線期交所…');
     poll(my);
+    loadPast().then(ch => { if (ch && my === gen && !isDaily(mins())) rebuild(); });
   }
   function setConn(live, text) { $('dot').className = 'dot' + (live ? ' live' : ''); $('conn').textContent = text; }
   function showPrice() { $('price').textContent = fmt(lastPrice); }
@@ -1088,6 +1122,7 @@
     load();
   };
   ['lookback', 'step', 'count'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
+  $('pastDays').onchange = () => { saveSettings(); loadPast().then(ch => { if (ch && !isDaily(mins())) rebuild(); }); };
   ['poll', 'qty', 'marginPer', 'feePer', 'reMult', 'sl', 'maxTrades', 'btInterval', 'btQty'].forEach(id => $(id).onchange = saveSettings);
   $('rootStop').onchange = () => { saveSettings(); drawStopLine(); };
   ['vmK', 'vmAvg', 'armPct'].forEach(id => $(id).onchange = () => { saveSettings(); calcVolMarks(); drawStopLine(); });
