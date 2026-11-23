@@ -51,11 +51,17 @@
   .hint{font-size:12px;color:var(--mute);margin:4px 0 0}
   #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--accent);color:#111;padding:10px 16px;border-radius:10px;font-weight:600;display:none;z-index:20;max-width:90vw;text-align:center}
   .full{grid-column:1/-1}
+  details.help { margin: 6px 0 2px; }
+  details.help > summary { list-style: none; cursor: pointer; display: inline-block; color: #8b93a7; font-size: 12px; padding: 3px 10px; border: 1px solid #262b36; border-radius: 8px; user-select: none; }
+  details.help > summary::-webkit-details-marker { display: none; }
+  details.help[open] > summary { color: #f0b90b; border-color: #f0b90b55; }
+  details.help[open] > summary::after { content: '（收起）'; }
+  details.help > p.hint:first-of-type { margin-top: 8px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v4</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v5</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -98,9 +104,11 @@
     </div>
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
-    <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
+    <details class="help"><summary>ℹ️ 說明</summary>
+      <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 存在這支手機裡（網頁有開過才有）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
-  </div>
+    </details>
+</div>
 
   <div>
     <div class="card">
@@ -142,8 +150,10 @@
         <button id="closeBtn">平倉</button>
         <button id="resetBtn">重設帳戶</button>
       </div>
-      <p class="hint">小台 1 點＝50 元。保證金期交所常調整，請照你期貨商公告的數字改。</p>
-    </div>
+      <details class="help"><summary>ℹ️ 說明</summary>
+        <p class="hint">小台 1 點＝50 元。保證金期交所常調整，請照你期貨商公告的數字改。</p>
+      </details>
+</div>
 
     <div class="card">
       <h2>回測（紅虛線做多、綠虛線做空）</h2>
@@ -175,8 +185,10 @@
       <div class="row"><button id="btBtn">▶ 開始回測</button></div>
       <div id="btResult" style="display:none"></div>
       <div class="log" id="btTrades" style="margin-top:8px"></div>
-      <p class="hint">分K 回測用的是<b>這支手機自己記錄下來的K棒</b>（目前 <span id="barCount">0</span> 根 1 分K），記錄越久越準；日／週／月K 回測用期交所最近 5 年的資料。規則：虛線出現在K棒收盤，下一根開盤進場；紅虛線→做多（有空單先平），綠虛線→做空（有多單先平）。根號停損、停損後買點規則跟幣安版一樣。手續費＋期交稅用上面帳戶的設定。過去的結果不代表未來。</p>
-      <div class="row"><button id="clearBars">清除記錄的K棒</button></div>
+      <details class="help"><summary>ℹ️ 說明</summary>
+        <p class="hint">分K 回測用的是<b>這支手機自己記錄下來的K棒</b>（目前 <span id="barCount">0</span> 根 1 分K），記錄越久越準；日／週／月K 回測用期交所最近 5 年的資料。規則：虛線出現在K棒收盤，下一根開盤進場；紅虛線→做多（有空單先平），綠虛線→做空（有多單先平）。根號停損、停損後買點規則跟幣安版一樣。手續費＋期交稅用上面帳戶的設定。過去的結果不代表未來。</p>
+      </details>
+<div class="row"><button id="clearBars">清除記錄的K棒</button></div>
     </div>
 
     <div class="card">
@@ -188,15 +200,19 @@
       <div class="row">
         <label>停損後買點：量 ≥ 前一根的</label><input id="reMult" type="number" step="0.1" min="0.1" value="0.5"><label>倍</label>
       </div>
-      <p class="hint" style="margin-top:0">做多：停損＝√（下單那根K之前的前波低點 × 下單後最高價），跌破就平倉；做空反過來。停損出場後，紅K量 ≥ 前一根 × 倍數 → 買進點，綠K → 做空點，網頁會提醒你。</p>
-      <div class="row">
+      <details class="help"><summary>ℹ️ 說明</summary>
+        <p class="hint">做多：停損＝√（下單那根K之前的前波低點 × 下單後最高價），跌破就平倉；做空反過來。停損出場後，紅K量 ≥ 前一根 × 倍數 → 買進點，綠K → 做空點，網頁會提醒你。</p>
+      </details>
+<div class="row">
         <label>保險停損</label><input id="sl" type="number" step="1" min="0" value="0"><label>點（反向幾點就平倉，0＝不用）</label>
       </div>
       <div class="row">
         <label>每日最多</label><input id="maxTrades" type="number" min="1" value="50"><label>筆進場</label>
       </div>
-      <p class="hint">虧損吃掉 75% 保證金（風險指標低於 25%）會模擬強制平倉。</p>
-    </div>
+      <details class="help"><summary>ℹ️ 說明</summary>
+        <p class="hint">虧損吃掉 75% 保證金（風險指標低於 25%）會模擬強制平倉。</p>
+      </details>
+</div>
   </div>
 
   <div class="card full">
