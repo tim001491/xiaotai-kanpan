@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v11</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v12</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -239,7 +239,9 @@
 </script>
 <script>
 (() => {
-  const API = '/api/mxf';
+  const API = '/api/mxf';      // 一般函式（備用，每月 12.5 萬次）
+  const API_EDGE = '/api/mxe'; // 邊緣函式（主要，每月 100 萬次）
+  let edgeDownUntil = 0, usingEdge = true;
   const PV = 50, TAX = 0.00002, START_CASH = 500000, TW = 8 * 3600; // 小台 1 點 50 元；期交稅 十萬分之2；K棒時間用台灣時間
   const $ = id => document.getElementById(id);
 
@@ -661,13 +663,25 @@
     catch (e) { throw e.name === 'AbortError' ? new Error('逾時，重試中') : e; }
     finally { clearTimeout(tm); }
   }
+  // 先用邊緣函式，抓不到（網路錯誤、找不到、期交所擋）就改用一般函式，5 分鐘後再試邊緣函式
+  async function apiFetch(query, ms) {
+    if (Date.now() >= edgeDownUntil) {
+      try {
+        const r = await fetchT(`${API_EDGE}?${query}&_=${Date.now()}`, ms);
+        if (r.ok && (r.headers.get('content-type') || '').includes('json')) { usingEdge = true; return r; }
+      } catch {}
+      edgeDownUntil = Date.now() + 5 * 60e3;
+    }
+    usingEdge = false;
+    return fetchT(`${API}?${query}&_=${Date.now()}`, ms);
+  }
   function restartPoll() { const my = ++gen; clearTimeout(pollTimer); poll(my); }
   async function poll(my) {
     if (my !== gen) return;
     if (document.hidden) { pollTimer = setTimeout(() => poll(my), 5000); return; } // 網頁不在前面就先不抓，省流量
     try {
       const mt = isFull() ? '' : '&mt=0';
-      const r = await fetchT(`${API}?a=quote&c=${isNext() ? 'next' : 'near'}${mt}&_=${Date.now()}`);
+      const r = await apiFetch(`a=quote&c=${isNext() ? 'next' : 'near'}${mt}`);
       const ct = r.headers.get('content-type') || '';
       if (!ct.includes('json')) throw new Error(r.status === 404 ? '找不到 /api/mxf（netlify/functions/mxf.mjs 還沒上傳？）' : 'HTTP ' + r.status);
       const q = await r.json();
@@ -680,7 +694,7 @@
   function onQuote(q) {
     const p = q.price, v = q.vol;
     const sess = q.mt === '0' ? '日盤' : '夜盤';
-    setConn(true, `${PROD_NAME[prod()]}（${q.name || '小台'}）・${sess}${q.time ? '・' + String(q.time).replace(/^(\d{2})(\d{2})(\d{2}).*$/, '$1:$2:$3') : ''}`);
+    setConn(true, `${usingEdge ? '⚡' : ''}${PROD_NAME[prod()]}（${q.name || '小台'}）・${sess}${q.time ? '・' + String(q.time).replace(/^(\d{2})(\d{2})(\d{2}).*$/, '$1:$2:$3') : ''}`);
     quoteHHMM = String(q.time || '').padStart(6, '0').slice(0, 4);
     // 報價時間跟現在差太多就標出來（期交所報價表偶爾會慢）
     const tw = new Date(Date.now() + TW * 1000), nowS = tw.getUTCHours() * 3600 + tw.getUTCMinutes() * 60 + tw.getUTCSeconds();
@@ -719,7 +733,7 @@
     if (!sym || histBusy || (!force && Date.now() - histAt < 5000)) return;
     histBusy = true; histAt = Date.now();
     try {
-      const r = await fetchT(`${API}?a=hist&sym=${encodeURIComponent(sym)}&_=${Date.now()}`, 8000);
+      const r = await apiFetch(`a=hist&sym=${encodeURIComponent(sym)}`, 8000);
       const j = await r.json(); if (!j.ok) return;
       useHistQuote(j.data?.RtData);
       const rows = ticksToBars(j.data?.RtData); if (!rows.length || lastQ?.sym !== sym) return;
