@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v9</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v10</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -285,7 +285,7 @@
   const saveBars = () => { if (!barsDirty) return; barsDirty = false; store.set(curBarsKey, bars1m); $('barCount').textContent = bars1m.length; };
   setInterval(saveBars, 10000);
   addEventListener('pagehide', saveBars);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveBars(); else { baseVol = null; setTimeout(() => syncHistory(true), 300); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveBars(); else { baseVol = null; restartPoll(); setTimeout(() => syncHistory(true), 300); } });
 
   // 把 1 分K 合成 N 分K；60 分K 日盤從 08:45 起算（08:45、09:45…）
   function bucketOf(t, mins) {
@@ -653,11 +653,19 @@
     if (candles.length !== before) { setTimeout(calcVolMarks); setTimeout(checkReentry); }
     if (!locked) calcLevels();
   }
+  // 每次抓報價最多等 6 秒，手機網路卡住也不會讓報價停下來
+  async function fetchT(url, ms = 6000) {
+    const ac = new AbortController(), tm = setTimeout(() => ac.abort(), ms);
+    try { return await fetch(url, { cache: 'no-store', signal: ac.signal }); }
+    catch (e) { throw e.name === 'AbortError' ? new Error('逾時，重試中') : e; }
+    finally { clearTimeout(tm); }
+  }
+  function restartPoll() { const my = ++gen; clearTimeout(pollTimer); poll(my); }
   async function poll(my) {
     if (my !== gen) return;
     try {
       const mt = isFull() ? '' : '&mt=0';
-      const r = await fetch(`${API}?a=quote&c=${isNext() ? 'next' : 'near'}${mt}&_=${Date.now()}`, { cache: 'no-store' });
+      const r = await fetchT(`${API}?a=quote&c=${isNext() ? 'next' : 'near'}${mt}&_=${Date.now()}`);
       const ct = r.headers.get('content-type') || '';
       if (!ct.includes('json')) throw new Error(r.status === 404 ? '找不到 /api/mxf（netlify/functions/mxf.mjs 還沒上傳？）' : 'HTTP ' + r.status);
       const q = await r.json();
@@ -671,21 +679,27 @@
     const p = q.price, v = q.vol;
     const sess = q.mt === '0' ? '日盤' : '夜盤';
     setConn(true, `${PROD_NAME[prod()]}（${q.name || '小台'}）・${sess}${q.time ? '・' + String(q.time).replace(/^(\d{2})(\d{2})(\d{2}).*$/, '$1:$2:$3') : ''}`);
-    if (q.ref > 0) { const d = p - q.ref; $('chg').innerHTML = `<span class="${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : ''}${Math.abs(d)}（${(d / q.ref * 100).toFixed(2)}%）</span>`; }
+    quoteHHMM = String(q.time || '').padStart(6, '0').slice(0, 4);
+    // 報價時間跟現在差太多就標出來（期交所報價表偶爾會慢）
+    const tw = new Date(Date.now() + TW * 1000), nowS = tw.getUTCHours() * 3600 + tw.getUTCMinutes() * 60 + tw.getUTCSeconds();
+    const qt = String(q.time || ''), qS = qt.length >= 4 ? +qt.slice(0, 2) * 3600 + +qt.slice(2, 4) * 60 + +(qt.slice(4, 6) || 0) : nowS;
+    let lag = nowS - qS; if (lag < 0) lag += 86400;
+    quoteStale = lag > 60 && lag < 3 * 3600;
+    if (quoteStale) { $('conn').textContent += `（報價表慢 ${Math.round(lag / 60)} 分，改用1分K的價）`; histAt = 0; } // 報價表慢就馬上改抓1分K
     let dv = 0, changed = false;
     if (baseSym === q.sym && baseVol != null) {
       if (v > baseVol) { dv = v - baseVol; changed = true; }
       else if (v === baseVol && lastQ && p !== lastQ.price) changed = true;
     }
     baseSym = q.sym; baseVol = v; lastQ = q;
-    if (changed) addTick(p, dv, Math.floor((q.serverTime || Date.now()) / 1000));
+    if (changed && !quoteStale) addTick(p, dv, Math.floor((q.serverTime || Date.now()) / 1000));
     if (q.mt === '0' && q.open > 0) {
       const d = new Date((q.serverTime || Date.now()) + TW * 1000);
       dayQuote = { time: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000, open: q.open, high: Math.max(q.high || p, p), low: Math.min(q.low || p, p), close: p, volume: v };
       store.set(dqKey(), dayQuote);
       if (isDaily(mins()) && !isFull() && candles.length && daily[dayModeKey()]) updateLiveDaily();
     }
-    onPrice(p);
+    if (!quoteStale) { onPrice(p); showChg(p, q.ref); }
     syncHistory(q.sym !== histSym); histSym = q.sym;
   }
   function updateLiveDaily() {
@@ -700,11 +714,12 @@
   let histBusy = false, histAt = 0;
   async function syncHistory(force) {
     const sym = lastQ?.sym;
-    if (!sym || histBusy || (!force && Date.now() - histAt < 20000)) return;
+    if (!sym || histBusy || (!force && Date.now() - histAt < 10000)) return;
     histBusy = true; histAt = Date.now();
     try {
-      const r = await fetch(`${API}?a=hist&sym=${encodeURIComponent(sym)}&_=${Date.now()}`, { cache: 'no-store' });
+      const r = await fetchT(`${API}?a=hist&sym=${encodeURIComponent(sym)}&_=${Date.now()}`, 8000);
       const j = await r.json(); if (!j.ok) return;
+      useHistQuote(j.data?.RtData);
       const rows = ticksToBars(j.data?.RtData); if (!rows.length || lastQ?.sym !== sym) return;
       const from = rows[0].time, to = rows.at(-1).time;
       const keepAfter = bars1m.filter(b => b.time > to && b.time < to + 3600); // 比期交所更新的那一兩根（即時組的）留著
@@ -713,6 +728,20 @@
       barsDirty = true; saveBars();
       if (!isDaily(mins())) rebuild();
     } catch {} finally { histBusy = false; }
+  }
+  // 兩個來源（報價表、1分K）哪個比較新就用哪個的成交價
+  let quoteHHMM = '', histHHMM = '', quoteStale = false;
+  function useHistQuote(R) {
+    const Q = R?.Quote, ticks = R?.Ticks; if (!Q || !Array.isArray(ticks) || !ticks.length) return;
+    const p = parseFloat(String(Q.CLastPrice).replace(/,/g, '')); if (!(p > 0)) return;
+    const T = String(ticks.at(-1)[0]).padStart(6, '0').slice(0, 4);
+    histHHMM = T;
+    if ((T >= quoteHHMM || quoteStale) && p !== lastPrice) { onPrice(p); showChg(p, parseFloat(Q.CRefPrice)); }
+  }
+  function showChg(p, ref) {
+    if (!(ref > 0)) return;
+    const d = p - ref;
+    $('chg').innerHTML = `<span class="${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : ''}${Math.abs(d)}（${(d / ref * 100).toFixed(2)}%）</span>`;
   }
   function ticksToBars(R) {
     if (!R || !Array.isArray(R.Ticks) || !R.Ticks.length) return [];
