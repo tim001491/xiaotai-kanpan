@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v25</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v26</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -113,7 +113,7 @@
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <div class="sub"><div class="tag" id="kdTag">KD (9,3,3)</div><div id="kdChart"></div><div class="vlayer" id="vlKd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
-      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(從最右邊往左數的第一個轉折高點 × 它之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(從最右邊往左數的第一個轉折低點 × 它之後往右的最高點)，至少會用到最新那根K，之後有更高（更低）點就跟著換。轉折點＝從最新那根往左走，第一根比左邊那根高（低）、也不比右邊兩根低（高）的K，反彈的小高點、回檔的小低點都算；最新那根K 自己就是轉折點時，用那根K 自己的最低（最高）點。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
+      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(從最右邊往左數的第一個轉折高點 × 它之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(從最右邊往左數的第一個轉折低點 × 它之後往右的最高點)，至少會用到最新那根K，之後有更高（更低）點就跟著換。轉折點＝從最新那根往左走，第一根比左邊那根高（低）、也不比右邊兩根低（高）、而且右邊已經有 K 棒轉回來的K；反彈的小高點、回檔的小低點都算，最新那根還在創高（創低）不算。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
@@ -645,10 +645,11 @@
     const lastBar = slice.at(-1);
     let iH = -1, iL = -1;
     piv.forEach((p, i) => { if (p.type === 'H') iH = i; else iL = i; });
-    // 預測用「最右邊往左數的第一個轉折點」：從最新那根往左走，第一根「比左邊那根高（低）、也不比右邊兩根低（高）」的K
-    // ＝價格在這根轉頭；所以反彈的小高點、回檔的小低點都算。最新那根K 自己是轉折點時，就用它自己的低（高）點
+    // 預測用「最右邊往左數的第一個轉折點」：往左走第一根「比左邊那根高（低）、也不比右邊兩根低（高）」，
+    // 而且右邊已經至少有 1 根K（價格真的轉頭了）。最新那根還在創高（創低）不算，要往左找上一個轉折。
+    // 都找不到才用最新那根K。
     const firstTurn = isLow => {
-      for (let j = slice.length - 1; j >= 0; j--) {
+      for (let j = slice.length - 2; j >= 0; j--) {
         const v = isLow ? slice[j].low : slice[j].high; let ok = true;
         for (let t = Math.max(0, j - 1); t <= Math.min(slice.length - 1, j + 2) && ok; t++) {
           if (t === j) continue;
@@ -657,7 +658,7 @@
         }
         if (ok) return j;
       }
-      return -1;
+      return slice.length - 1;
     };
     const predMarks = [];
     // 預測壓力＝√(第一個轉折高點 × 它之後往右的最低點，至少是最新那根K 的最低點)
