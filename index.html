@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v13</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v14</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -112,7 +112,7 @@
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
       <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
-    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
+    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
 
@@ -357,9 +357,22 @@
     if (c && c.at > Date.now() - 30 * 60e3) { daily[mode] = c; return c.bars; }
     try {
       const toT = s => { const [y, m, d] = String(s).split(/[-\/]/).map(Number); return Date.UTC(y, m - 1, d) / 1000; };
+      // 先讀 GitHub 每天整理好的 data/daily.json（快、不用函式額度），沒有才問 /api/mtx
+      try {
+        const r = await fetchT('/data/daily.json?d=' + new Date().toISOString().slice(0, 13), 15000);
+        if (r.ok) {
+          const j = await r.json(), name = (mode.endsWith('_next') ? 'next_' : 'near_') + (mode.startsWith('all') ? 'all' : 'day');
+          const arr = j[name] || [];
+          if (arr.length) {
+            const bars = arr.map(([d, o, h, l, c, v]) => ({ time: toT(d), open: o, high: h, low: l, close: c, volume: v }));
+            daily[mode] = { at: Date.now(), bars }; store.set(key, daily[mode]);
+            return bars;
+          }
+        }
+      } catch {}
       // 直接抓期交所「期貨每日交易行情」（/api/mtx），每天取成交量最大的月合約＝近月
       const get = async night => {
-        const r = await fetch(`/api/mtx?months=60${night ? '&session=night' : ''}${mode.endsWith('_next') ? '&which=next' : ''}`);
+        const r = await fetchT(`/api/mtx?months=24${night ? '&session=night' : ''}${mode.endsWith('_next') ? '&which=next' : ''}`, 25000);
         const j = await r.json().catch(() => ({}));
         if (!j.bars || !j.bars.length) throw new Error(j.error || '期交所沒有回傳資料');
         return j.bars;
