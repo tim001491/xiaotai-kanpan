@@ -55,7 +55,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v3</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v4</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -99,7 +99,7 @@
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
-    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：網頁每幾秒向期交所抓一次報價，自己把成交價、成交量組成K棒，存在這支手機裡。<b>網頁開著才會記錄</b>，第一次打開K棒是空的，開著越久K棒越多；關掉再打開，中間那段會是空白。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
+    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 存在這支手機裡（網頁有開過才有）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
   </div>
 
   <div>
@@ -247,7 +247,7 @@
   const saveBars = () => { if (!barsDirty) return; barsDirty = false; store.set(curBarsKey, bars1m); $('barCount').textContent = bars1m.length; };
   setInterval(saveBars, 10000);
   addEventListener('pagehide', saveBars);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveBars(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveBars(); else { baseVol = null; setTimeout(() => syncHistory(true), 300); } });
 
   // 把 1 分K 合成 N 分K；60 分K 日盤從 08:45 起算（08:45、09:45…）
   function bucketOf(t, mins) {
@@ -556,7 +556,7 @@
   }
 
   // ---------- data：輪詢期交所報價、自己組K棒 ----------
-  let baseVol = null, baseSym = null, lastQ = null, histTried = {};
+  let baseVol = null, baseSym = null, lastQ = null, histSym = null;
   let dailyGen = 0;
   async function rebuild() {
     const m = mins(), dly = isDaily(m);
@@ -580,6 +580,7 @@
     let b = bars1m.at(-1);
     if (b && b.time === t) { b.high = Math.max(b.high, p); b.low = Math.min(b.low, p); b.close = p; b.volume += dv; }
     else if (!b || t > b.time) { bars1m.push({ time: t, open: p, high: p, low: p, close: p, volume: dv }); if (bars1m.length > 6000) bars1m.splice(0, bars1m.length - 6000); }
+    else if (b.time - t > 600) { bars1m = bars1m.filter(x => x.time <= t); barsDirty = true; rebuild(); return; } // 手機存到不合理的未來K棒，清掉
     else return; // 時間倒退就略過
     barsDirty = true;
     if (isDaily(mins())) return;
@@ -626,7 +627,7 @@
       if (isDaily(mins()) && !isFull() && candles.length && daily[dayModeKey()]) updateLiveDaily();
     }
     onPrice(p);
-    if (q.sym && !histTried[q.sym]) { histTried[q.sym] = 1; tryHistory(q.sym); }
+    syncHistory(q.sym !== histSym); histSym = q.sym;
   }
   function updateLiveDaily() {
     const m = mins(), arr = agg(withLiveDay(daily[dayModeKey()].bars), m), before = candles.length;
@@ -635,41 +636,50 @@
     if (candles.length !== before) { setTimeout(calcVolMarks); setTimeout(checkReentry); }
     if (!locked) calcLevels();
   }
-  // 試著跟期交所要當天的 1 分K 補進來（格式不確定，抓不到就算了）
-  async function tryHistory(sym) {
+  // 跟期交所要「這一盤」的 1 分K（RtData.Field = T,O,H,L,C,V；T 是那一分鐘結束的時間），
+  // 每 20 秒同步一次：期交所的資料為準，蓋掉手機自己組的同一段，網頁關掉期間的空白也會補回來
+  let histBusy = false, histAt = 0;
+  async function syncHistory(force) {
+    const sym = lastQ?.sym;
+    if (!sym || histBusy || (!force && Date.now() - histAt < 20000)) return;
+    histBusy = true; histAt = Date.now();
     try {
-      const r = await fetch(`${API}?a=hist&sym=${encodeURIComponent(sym)}`, { cache: 'no-store' });
+      const r = await fetch(`${API}?a=hist&sym=${encodeURIComponent(sym)}&_=${Date.now()}`, { cache: 'no-store' });
       const j = await r.json(); if (!j.ok) return;
-      const rows = findBarRows(j.data); if (!rows.length) return;
-      const have = new Set(bars1m.map(b => b.time));
-      let added = 0;
-      for (const b of rows) if (!have.has(b.time)) { bars1m.push(b); added++; }
-      if (!added) return;
-      bars1m.sort((a, b) => a.time - b.time); barsDirty = true; saveBars(); rebuild();
-      addLog(`📥 從期交所補進 ${added} 根當日 1 分K`);
-    } catch {}
+      const rows = ticksToBars(j.data?.RtData); if (!rows.length || lastQ?.sym !== sym) return;
+      const from = rows[0].time, to = rows.at(-1).time;
+      const keepAfter = bars1m.filter(b => b.time > to && b.time < to + 3600); // 比期交所更新的那一兩根（即時組的）留著
+      bars1m = bars1m.filter(b => b.time < from).concat(rows, keepAfter);
+      if (bars1m.length > 6000) bars1m.splice(0, bars1m.length - 6000);
+      barsDirty = true; saveBars();
+      if (!isDaily(mins())) rebuild();
+    } catch {} finally { histBusy = false; }
   }
-  function findBarRows(data) {
-    let best = [];
-    const walk = (o, depth) => {
-      if (!o || depth > 5) return;
-      if (Array.isArray(o)) {
-        if (o.length > 5 && typeof o[0] === 'object' && o[0] && !Array.isArray(o[0])) {
-          const ks = Object.keys(o[0]), k = re => ks.find(x => re.test(x));
-          const kO = k(/open/i), kH = k(/high/i), kL = k(/low/i), kC = k(/close|last/i), kV = k(/vol/i), kT = k(/time|date|dt/i);
-          if (kO && kH && kL && kC && kT) {
-            const rows = o.map(r => {
-              const t = parseTW(r[kT]), n = x => parseFloat(String(x).replace(/,/g, ''));
-              return t ? { time: t, open: n(r[kO]), high: n(r[kH]), low: n(r[kL]), close: n(r[kC]), volume: kV ? n(r[kV]) || 0 : 0 } : null;
-            }).filter(b => b && b.open > 0 && b.high > 0);
-            if (rows.length > best.length) best = rows;
-          }
-        }
-        o.forEach(x => walk(x, depth + 1));
-      } else if (typeof o === 'object') Object.values(o).forEach(x => walk(x, depth + 1));
-    };
-    walk(data, 0);
-    return best;
+  function ticksToBars(R) {
+    if (!R || !Array.isArray(R.Ticks) || !R.Ticks.length) return [];
+    const F = (R.Field || ['T', 'O', 'H', 'L', 'C', 'V']).map(String), ix = k => F.indexOf(k);
+    const iT = ix('T'), iO = ix('O'), iH = ix('H'), iL = ix('L'), iC = ix('C'), iV = ix('V');
+    if (iT < 0 || iC < 0) return [];
+    const start = String(R.Info?.Sessions?.[0]?.Start || '0845');
+    const night = +start.slice(0, 2) >= 14;
+    const now = new Date(Date.now() + TW * 1000);
+    let base = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 1000;
+    if (night && now.getUTCHours() < 14) base -= 86400; // 過了半夜的夜盤，開盤日是昨天
+    const n = x => parseFloat(String(x).replace(/,/g, ''));
+    const out = [];
+    for (const k of R.Ticks) {
+      const T = String(k[iT]).padStart(6, '0'), hh = +T.slice(0, 2), mm = +T.slice(2, 4);
+      let t = base + hh * 3600 + mm * 60;
+      if (night && T < start.padEnd(6, '0')) t += 86400; // 夜盤過半夜
+      t -= 60; // 期交所標的是結束時間，換成開始時間（08:46 那根 → 08:45）
+      const c = n(k[iC]); if (!(c > 0)) continue;
+      const o = iO >= 0 ? n(k[iO]) : c, h = iH >= 0 ? n(k[iH]) : c, l = iL >= 0 ? n(k[iL]) : c;
+      const b = { time: t, open: o > 0 ? o : c, high: h > 0 ? h : c, low: l > 0 ? l : c, close: c, volume: iV >= 0 ? n(k[iV]) || 0 : 0 };
+      const last = out.at(-1);
+      if (last && last.time === b.time) Object.assign(last, { high: Math.max(last.high, b.high), low: Math.min(last.low, b.low), close: b.close, volume: last.volume + b.volume });
+      else if (!last || b.time > last.time) out.push(b);
+    }
+    return out;
   }
   function parseTW(s) {
     s = String(s ?? '');
