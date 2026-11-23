@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v26</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v27</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -451,8 +451,13 @@
     crosshair: { mode: 0 },
     handleScroll: TOUCH_SCROLL, handleScale: TOUCH_SCALE
   });
+  // 均線：5、10、20（跟三竹一樣）
+  const MA_DEF = [[5, '#ffd54f'], [10, '#4dd0e1'], [20, '#ec6fcf']];
+  const maSeries = MA_DEF.map(([n, color]) => chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }));
   const volChart = LWC.createChart($('volChart'), subOpts(false));
   const volSeries = volChart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: true });
+  const VMA_DEF = [[5, '#ffd54f'], [10, '#4dd0e1']];
+  const vmaSeries = VMA_DEF.map(([n, color]) => volChart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, priceFormat: { type: 'volume' } }));
   const macdChart = LWC.createChart($('macdChart'), subOpts(false));
   const oscSeries = macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false });
   const difSeries = macdChart.addLineSeries({ color: '#f0b90b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
@@ -513,6 +518,9 @@
     });
     return out;
   }
+  // 第 i 根往回 n 根的平均（不夠 n 根就沒有）
+  function maAt(i, n, key) { if (i < n - 1) return null; let s = 0; for (let j = i - n + 1; j <= i; j++) s += candles[j][key] || 0; return s / n; }
+  const maLine = (n, key) => candles.map((c, i) => { const v = maAt(i, n, key); return v == null ? { time: c.time } : { time: c.time, value: v }; });
   const oscColor = (m, prev) => m.osc >= 0 ? (prev && m.osc < prev.osc ? UP + '80' : UP) : (prev && m.osc > prev.osc ? DN + '80' : DN);
   const fmtVol = v => v >= 1e4 ? (v / 1e4).toFixed(2) + '萬' : String(Math.round(v));
   let hoverIdx = null;
@@ -522,14 +530,16 @@
     const m = i === candles.length - 1 && mLast ? mLast : macdCalc()[i];
     if (c) {
       const prev = candles[i - 1], ch = prev ? c.close - prev.close : 0, col = c.close >= c.open ? UP : DN;
-      $('ohlcTag').innerHTML = `<span style="color:#8b93a7">${barTime(c.time)}</span>${prev ? ` <span style="color:${ch > 0 ? UP : ch < 0 ? DN : '#8b93a7'}">${ch > 0 ? '▲' : ch < 0 ? '▼' : ''}${Math.abs(ch)}</span>` : ''}<br>開<b style="color:${col}">${fmt(c.open)}</b> 高<b style="color:${col}">${fmt(c.high)}</b> 低<b style="color:${col}">${fmt(c.low)}</b> 收<b style="color:${col}">${fmt(c.close)}</b>`;
+      $('ohlcTag').innerHTML = `<span style="color:#8b93a7">${barTime(c.time)}</span>${prev ? ` <span style="color:${ch > 0 ? UP : ch < 0 ? DN : '#8b93a7'}">${ch > 0 ? '▲' : ch < 0 ? '▼' : ''}${Math.abs(ch)}</span>` : ''}<br>開<b style="color:${col}">${fmt(c.open)}</b> 高<b style="color:${col}">${fmt(c.high)}</b> 低<b style="color:${col}">${fmt(c.low)}</b> 收<b style="color:${col}">${fmt(c.close)}</b><br>${MA_DEF.map(([n, mc]) => { const v = maAt(i, n, 'close'); return `<span style="color:${mc}">MA${n} ${v == null ? '--' : fmt(v, 1)}</span>`; }).join(' ')}`;
     }
-    if (c) $('volTag').innerHTML = `成交量 <span style="color:${c.close >= c.open ? UP : DN}">${fmtVol(c.volume || 0)} 口</span>`;
+    if (c) $('volTag').innerHTML = `成交量 <span style="color:${c.close >= c.open ? UP : DN}">${fmtVol(c.volume || 0)} 口</span>　${VMA_DEF.map(([n, mc]) => { const v = maAt(i, n, 'volume'); return `<span style="color:${mc}">${n}均 ${v == null ? '--' : fmtVol(v)}</span>`; }).join('　')}`;
     const kd = kdCalc()[i];
     if (kd) $('kdTag').innerHTML = `KD (9,3,3)　<span style="color:#f0b90b">K ${kd.k.toFixed(2)}</span>　<span style="color:#3d8bfd">D ${kd.d.toFixed(2)}</span>${kd.k >= 80 ? '　<span style="color:' + UP + '">超買</span>' : kd.k <= 20 ? '　<span style="color:' + DN + '">超賣</span>' : ''}`;
     if (m) $('macdTag').innerHTML = `MACD (12,26,9)　<span style="color:#f0b90b">DIF ${m.dif.toFixed(2)}</span>　<span style="color:#3d8bfd">DEA ${m.dea.toFixed(2)}</span>　<span style="color:${m.osc >= 0 ? UP : DN}">OSC ${m.osc.toFixed(2)}</span>`;
   }
   function setSubData() {
+    MA_DEF.forEach(([n], k) => maSeries[k].setData(maLine(n, 'close')));
+    VMA_DEF.forEach(([n], k) => vmaSeries[k].setData(maLine(n, 'volume')));
     volSeries.setData(candles.map(volPoint));
     const m = macdCalc();
     oscSeries.setData(m.map((x, i) => ({ time: x.time, value: x.osc, color: oscColor(x, m[i - 1]) })));
@@ -542,6 +552,9 @@
   }
   function updateSubData() {
     const c = candles.at(-1); if (!c) return;
+    const li = candles.length - 1;
+    MA_DEF.forEach(([n], k) => { const v = maAt(li, n, 'close'); if (v != null) maSeries[k].update({ time: c.time, value: v }); });
+    VMA_DEF.forEach(([n], k) => { const v = maAt(li, n, 'volume'); if (v != null) vmaSeries[k].update({ time: c.time, value: v }); });
     volSeries.update(volPoint(c));
     const m = macdCalc(), x = m.at(-1);
     oscSeries.update({ time: x.time, value: x.osc, color: oscColor(x, m.at(-2)) });
