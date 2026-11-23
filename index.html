@@ -55,11 +55,12 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v1</small></h1>
-  <select id="session">
-    <option value="auto" selected>自動（日盤／夜盤）</option>
-    <option value="0">日盤 08:45–13:45</option>
-    <option value="1">夜盤 15:00–05:00</option>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v3</small></h1>
+  <select id="prod">
+    <option value="nearAll" selected>小台近全</option>
+    <option value="nearDay">小台近月</option>
+    <option value="nextAll">小台次全</option>
+    <option value="nextDay">小台次月</option>
   </select>
   <select id="interval">
     <option value="1">1分K</option>
@@ -98,7 +99,7 @@
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
-    <p class="hint">📌 K線怎麼來：網頁每幾秒向期交所抓一次小台近月報價，自己把成交價、成交量組成K棒，存在這支手機裡。<b>網頁開著才會記錄</b>，第一次打開K棒是空的，開著越久K棒越多；關掉再打開，中間那段會是空白。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取成交量最大的近月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
+    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：網頁每幾秒向期交所抓一次報價，自己把成交價、成交量組成K棒，存在這支手機裡。<b>網頁開著才會記錄</b>，第一次打開K棒是空的，開著越久K棒越多；關掉再打開，中間那段會是空白。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（直接向期交所抓「期貨每日交易行情」，最近 5 年、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
   </div>
 
   <div>
@@ -117,10 +118,6 @@
       </div>
       <div class="row">
         <label>由右往左換算</label><input id="count" type="number" min="1" max="10" value="2"><label>段</label>
-      </div>
-      <div class="row">
-        <label>日／週／月K</label>
-        <select id="dayMode"><option value="day" selected>只算日盤</option><option value="all">含夜盤</option></select>
       </div>
       <div class="row">
         <label>每</label><input id="poll" type="number" min="2" max="30" value="3"><label>秒抓一次報價</label>
@@ -229,7 +226,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
-  const SETTING_IDS = ['session','interval','dayMode','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
+  const SETTING_IDS = ['prod','interval','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
   const saved = store.get('mxf_settings', {});
   SETTING_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; if ($(id).tagName === 'SELECT' && !$(id).value) $(id).selectedIndex = id === 'step' ? 1 : 0; });
   const saveSettings = () => store.set('mxf_settings', Object.fromEntries(SETTING_IDS.map(id => [id, $(id).value])));
@@ -240,9 +237,14 @@
   const saveAcct = () => store.set('mxf_acct', acct);
 
   // 1 分K 記錄（存在這支手機）
-  let bars1m = store.get('mxf_bars1m', []);
+  // 商品：小台近全／近月／次全／次月（全＝日盤＋夜盤，月＝只看日盤）
+  const prod = () => $('prod').value || 'nearAll';
+  const isNext = () => prod().startsWith('next'), isFull = () => prod().endsWith('All');
+  const PROD_NAME = { nearAll: '小台近全', nearDay: '小台近月', nextAll: '小台次全', nextDay: '小台次月' };
+  const barsKey = () => isNext() ? 'mxf_bars1m_next' : 'mxf_bars1m';
+  let curBarsKey = barsKey(), bars1m = store.get(curBarsKey, []);
   let barsDirty = false;
-  const saveBars = () => { if (!barsDirty) return; barsDirty = false; store.set('mxf_bars1m', bars1m); $('barCount').textContent = bars1m.length; };
+  const saveBars = () => { if (!barsDirty) return; barsDirty = false; store.set(curBarsKey, bars1m); $('barCount').textContent = bars1m.length; };
   setInterval(saveBars, 10000);
   addEventListener('pagehide', saveBars);
   document.addEventListener('visibilitychange', () => { if (document.hidden) saveBars(); });
@@ -257,6 +259,9 @@
     const off = mins === 60 && m >= 8 * 60 + 45 && m < 13 * 60 + 45 ? 45 : 0;
     return day + (Math.floor((m - off) / mins) * mins + off) * 60;
   }
+  // 「近月／次月」只看日盤 08:45–13:45 的K棒；「近全／次全」日夜盤都算
+  const inDay = t => { const m = (t % 86400) / 60; return m >= 8 * 60 + 45 && m < 13 * 60 + 45; };
+  const viewBars = () => isFull() ? bars1m : bars1m.filter(b => inDay(b.time));
   function agg(arr, mins) {
     const out = [];
     for (const b of arr) {
@@ -271,7 +276,8 @@
 
   // ---------- 日K 歷史（直接抓期交所每日行情 /api/mtx）----------
   const daily = {}; // { day: [...], all: [...] }
-  async function getDaily(mode = $('dayMode').value) {
+  const dayModeKey = () => (isFull() ? 'all' : 'day') + (isNext() ? '_next' : '');
+  async function getDaily(mode = dayModeKey()) {
     const key = 'mxf_daily_' + mode, c = store.get(key, null);
     if (daily[mode] && daily[mode].at > Date.now() - 30 * 60e3) return daily[mode].bars;
     if (c && c.at > Date.now() - 30 * 60e3) { daily[mode] = c; return c.bars; }
@@ -279,14 +285,14 @@
       const toT = s => { const [y, m, d] = String(s).split(/[-\/]/).map(Number); return Date.UTC(y, m - 1, d) / 1000; };
       // 直接抓期交所「期貨每日交易行情」（/api/mtx），每天取成交量最大的月合約＝近月
       const get = async night => {
-        const r = await fetch(`/api/mtx?months=60${night ? '&session=night' : ''}`);
+        const r = await fetch(`/api/mtx?months=60${night ? '&session=night' : ''}${mode.endsWith('_next') ? '&which=next' : ''}`);
         const j = await r.json().catch(() => ({}));
         if (!j.bars || !j.bars.length) throw new Error(j.error || '期交所沒有回傳資料');
         return j.bars;
       };
       const dayRows = await get(false);
       let bars = dayRows.map(b => ({ time: toT(b.time), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume, k: b.contract }));
-      if (mode === 'all') {
+      if (mode.startsWith('all')) {
         // 含夜盤：期交所把前一晚的夜盤算在隔天，同一個合約就把夜盤的開盤、高低、量併進來
         const night = new Map((await get(true)).map(b => [toT(b.time), b]));
         bars = bars.map(b => {
@@ -303,9 +309,10 @@
     }
   }
   // 今天日盤進行中（或日盤收了但期交所資料還沒出來）：用即時報價補今天那根
-  let dayQuote = store.get('mxf_dayquote', null);
+  const dqKey = () => 'mxf_dayquote' + (isNext() ? '_next' : '');
+  let dayQuote = store.get(dqKey(), null);
   function withLiveDay(bars) {
-    if ($('dayMode').value !== 'day' || !dayQuote || !(dayQuote.open > 0)) return bars;
+    if (isFull() || !dayQuote || !(dayQuote.open > 0)) return bars;
     const last = bars.at(-1);
     if (last && last.time >= dayQuote.time) return bars;
     return [...bars, { time: dayQuote.time, open: dayQuote.open, high: dayQuote.high, low: dayQuote.low, close: dayQuote.close, volume: dayQuote.volume }];
@@ -560,7 +567,7 @@
       try { const d = await getDaily(); if (my !== dailyGen) return; candles = agg(withLiveDay(d), m); }
       catch (e) { candles = []; addLog('⚠ 日K 載入失敗：' + e.message); }
       if (my !== dailyGen || mins() !== m) return;
-    } else { dailyGen++; candles = agg(bars1m, m); }
+    } else { dailyGen++; candles = agg(viewBars(), m); }
     series.setData(candles);
     setSubData();
     calcLevels();
@@ -589,8 +596,8 @@
   async function poll(my) {
     if (my !== gen) return;
     try {
-      const mt = $('session').value === 'auto' ? '' : '&mt=' + $('session').value;
-      const r = await fetch(`${API}?a=quote${mt}&_=${Date.now()}`, { cache: 'no-store' });
+      const mt = isFull() ? '' : '&mt=0';
+      const r = await fetch(`${API}?a=quote&c=${isNext() ? 'next' : 'near'}${mt}&_=${Date.now()}`, { cache: 'no-store' });
       const ct = r.headers.get('content-type') || '';
       if (!ct.includes('json')) throw new Error(r.status === 404 ? '找不到 /api/mxf（netlify/functions/mxf.mjs 還沒上傳？）' : 'HTTP ' + r.status);
       const q = await r.json();
@@ -603,7 +610,7 @@
   function onQuote(q) {
     const p = q.price, v = q.vol;
     const sess = q.mt === '0' ? '日盤' : '夜盤';
-    setConn(true, `${q.name || '小台'}・${sess}${q.time ? '・' + String(q.time).replace(/^(\d{2})(\d{2})(\d{2}).*$/, '$1:$2:$3') : ''}`);
+    setConn(true, `${PROD_NAME[prod()]}（${q.name || '小台'}）・${sess}${q.time ? '・' + String(q.time).replace(/^(\d{2})(\d{2})(\d{2}).*$/, '$1:$2:$3') : ''}`);
     if (q.ref > 0) { const d = p - q.ref; $('chg').innerHTML = `<span class="${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : ''}${Math.abs(d)}（${(d / q.ref * 100).toFixed(2)}%）</span>`; }
     let dv = 0, changed = false;
     if (baseSym === q.sym && baseVol != null) {
@@ -615,14 +622,14 @@
     if (q.mt === '0' && q.open > 0) {
       const d = new Date((q.serverTime || Date.now()) + TW * 1000);
       dayQuote = { time: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000, open: q.open, high: Math.max(q.high || p, p), low: Math.min(q.low || p, p), close: p, volume: v };
-      store.set('mxf_dayquote', dayQuote);
-      if (isDaily(mins()) && $('dayMode').value === 'day' && candles.length && daily.day) updateLiveDaily();
+      store.set(dqKey(), dayQuote);
+      if (isDaily(mins()) && !isFull() && candles.length && daily[dayModeKey()]) updateLiveDaily();
     }
     onPrice(p);
     if (q.sym && !histTried[q.sym]) { histTried[q.sym] = 1; tryHistory(q.sym); }
   }
   function updateLiveDaily() {
-    const m = mins(), arr = agg(withLiveDay(daily.day.bars), m), before = candles.length;
+    const m = mins(), arr = agg(withLiveDay(daily[dayModeKey()].bars), m), before = candles.length;
     candles = arr;
     series.update(candles.at(-1)); updateSubData();
     if (candles.length !== before) { setTimeout(calcVolMarks); setTimeout(checkReentry); }
@@ -872,7 +879,7 @@
     try {
       saveBars();
       const bv = $('btInterval').value, m = isDaily(bv) ? bv : (+bv || 5), qty = Math.max(1, Math.floor(+$('btQty').value || 1));
-      const arr = isDaily(m) ? agg(withLiveDay(await getDaily()), m) : agg(bars1m, m);
+      const arr = isDaily(m) ? agg(withLiveDay(await getDaily()), m) : agg(viewBars(), m);
       const NAME = { D: '日K', W: '週K', M: '月K' };
       if (arr.length < 60) throw new Error(`${NAME[m] || m + ' 分K'} 只有 ${arr.length} 根，至少要 60 根。網頁多開一陣子讓它記錄，或改用比較短的週期`);
       const sigs = volMarksOf(arr).map(x => ({ i: x.i, k: x.red ? 'buy' : 'sell', why: x.red ? '紅虛線：連續兩根紅量放大' : '綠虛線：連續兩根綠量放大' }));
@@ -960,8 +967,12 @@
   twice('resetBtn', '重設帳戶', () => { acct = newAcct(); saveAcct(); $('log').innerHTML = ''; renderAcct(); drawStopLine(); addLog(`帳戶已重設為 ${fmt(START_CASH)} 元`); });
   twice('clearBars', '清除記錄的K棒', () => { bars1m = []; barsDirty = true; saveBars(); rebuild(); addLog('已清除記錄的K棒'); });
   $('interval').onchange = () => { saveSettings(); rebuild(); };
-  $('dayMode').onchange = () => { saveSettings(); if (isDaily(mins())) rebuild(); };
-  $('session').onchange = () => { saveSettings(); load(); };
+  $('prod').onchange = () => {
+    saveBars(); saveSettings();
+    curBarsKey = barsKey(); bars1m = store.get(curBarsKey, []); dayQuote = store.get(dqKey(), null); baseSym = null; lastPrice = null;
+    $('price').textContent = '--'; $('chg').textContent = '';
+    load();
+  };
   ['lookback', 'step', 'count'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
   ['poll', 'qty', 'marginPer', 'feePer', 'reMult', 'sl', 'maxTrades', 'btInterval', 'btQty'].forEach(id => $(id).onchange = saveSettings);
   $('rootStop').onchange = () => { saveSettings(); drawStopLine(); };

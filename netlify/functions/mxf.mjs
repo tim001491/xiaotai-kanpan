@@ -47,14 +47,18 @@ export default async (req) => {
     if (a === 'quote') {
       const j = await quoteList(cid, mt);
       const list = j?.RtData?.QuoteList || [];
-      // 去掉價差單（名稱有 /）、沒有成交價的；成交量最大的那個通常就是近月
-      const rows = list
-        .filter(q => !String(q.DispCName || '').includes('/') && !String(q.SymbolID || '').includes('/'))
-        .map(q => ({ q, price: num(q.CLastPrice), vol: num(q.CTotalVolume) }))
-        .filter(x => x.price > 0);
-      if (!rows.length) return json({ ok: false, mt, error: list.length ? '目前沒有成交（可能還沒開盤或已收盤）' : '期交所沒有回傳小台資料', n: list.length });
-      rows.sort((x, y) => (y.vol || 0) - (x.vol || 0));
-      const { q, price, vol } = rows[0];
+      // 只留月合約（代號 MXF+月份字母+年，例：MXFL6-F），排除週合約(MX4K6…)、價差、現貨；照到期月排序，c=near 取第一個、c=next 取第二個
+      const MON = 'ABCDEFGHIJKL', yNow = new Date(Date.now() + 8 * 3600e3).getUTCFullYear() % 10;
+      const monthly = list
+        .map(q => ({ q, m: String(q.SymbolID || '').match(/^MXF([A-L])(\d)-/) }))
+        .filter(x => x.m)
+        .map(x => ({ q: x.q, key: ((+x.m[2] - yNow + 11) % 10) * 12 + MON.indexOf(x.m[1]) })) // 年份只有個位數，用今年當基準（跨 2029→2030 也排得對）
+        .sort((x, y) => x.key - y.key);
+      const which = u.searchParams.get('c') === 'next' ? 1 : 0;
+      const pick = monthly[which];
+      if (!pick) return json({ ok: false, mt, error: list.length ? '找不到這個月份的小台合約' : '期交所沒有回傳小台資料', n: list.length });
+      const q = pick.q, price = num(q.CLastPrice), vol = num(q.CTotalVolume);
+      if (!(price > 0)) return json({ ok: false, mt, error: `${q.DispCName || ''} 目前沒有成交（可能還沒開盤或已收盤）` });
       return json({
         ok: true, mt, sym: q.SymbolID || '', name: q.DispCName || '小台', price, vol: vol || 0,
         time: q.CTime || '', date: q.CDate || '', open: num(q.COpenPrice), high: num(q.CHighPrice), low: num(q.CLowPrice),

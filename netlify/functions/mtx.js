@@ -43,9 +43,14 @@ function parse(csv, session) {
 }
 
 // 每天取成交量最大的月合約（就是近月），組成連續日K
-function continuous(rows) {
+// which='next'：每天照到期月排序取第二個（次月）
+function continuous(rows, which) {
   const byDay = {};
-  for (const r of rows) if (!byDay[r.date] || r.v > byDay[r.date].v) byDay[r.date] = r;
+  if (which === 'next') {
+    const all = {};
+    for (const r of rows) (all[r.date] = all[r.date] || []).push(r);
+    for (const [d, list] of Object.entries(all)) { list.sort((a, b) => a.mon.localeCompare(b.mon)); if (list[1]) byDay[d] = list[1]; }
+  } else for (const r of rows) if (!byDay[r.date] || r.v > byDay[r.date].v) byDay[r.date] = r;
   return Object.values(byDay)
     .sort((a, b) => a.date.localeCompare(b.date))
     .map(r => ({ time: r.date.replace(/\//g, '-'), open: r.o, high: r.h, low: r.l, close: r.c, volume: r.v, contract: r.mon }));
@@ -68,7 +73,7 @@ exports.handler = async (event) => {
       const parts = await Promise.all(ranges.slice(i, i + 6).map(([s, e]) => fetchRange(s, e).catch(() => '')));
       for (const p of parts) all.push(...parse(p, session));
     }
-    const bars = continuous(all);
+    const bars = continuous(all, event.queryStringParameters?.which);
     if (!bars.length) throw new Error('期交所沒有回傳資料');
     return {
       statusCode: 200,
