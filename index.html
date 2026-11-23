@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v21</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v22</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -112,7 +112,7 @@
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <div class="sub"><div class="tag" id="kdTag">KD (9,3,3)</div><div id="kdChart"></div><div class="vlayer" id="vlKd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
-      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(最新高點 × 之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(最新低點 × 之後往右的最高點)，低點就在最新那根K 時用那根K 的最高點，之後有更高點就跟著換。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
+      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(從最右邊往左數的第一個轉折高點 × 它之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(從最右邊往左數的第一個轉折低點 × 它之後往右的最高點)，至少會用到最新那根K，之後有更高（更低）點就跟著換。轉折點＝左右各 2 根K 裡最低（最高），而且右邊已經有 K 棒轉回來。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
@@ -640,17 +640,33 @@
     const lastBar = slice.at(-1);
     let iH = -1, iL = -1;
     piv.forEach((p, i) => { if (p.type === 'H') iH = i; else iL = i; });
-    // 預測壓力＝√(最新高點 × 它之後往右的最低點)；高點就在最後一根K 的話，用這根K 的最低點
-    if (iH >= 0) {
-      const H = piv[iH], after = slice.slice(H.idx + 1);
-      const lo = after.length ? after.reduce((m, c) => c.low < m.low ? c : m) : lastBar;
-      add('pRes', H.price, H.time, lo.low, lo.time, true);
+    // 預測用「最右邊往左數的第一個轉折點」：左右各 2 根K 裡最低（最高）、而且右邊至少已經有 1 根K 轉回來
+    const firstTurn = isLow => {
+      for (let j = slice.length - 2; j >= 0; j--) {
+        const v = isLow ? slice[j].low : slice[j].high; let ok = true;
+        for (let t = Math.max(0, j - 2); t <= Math.min(slice.length - 1, j + 2) && ok; t++) {
+          if (t === j) continue;
+          const u = isLow ? slice[t].low : slice[t].high;
+          if (isLow ? u < v : u > v) ok = false;
+        }
+        if (ok) return j;
+      }
+      return -1;
+    };
+    const predMarks = [];
+    // 預測壓力＝√(第一個轉折高點 × 它之後往右的最低點，至少是最新那根K 的最低點)
+    const jH = firstTurn(false);
+    if (jH >= 0) {
+      const H = slice[jH], lo = slice.slice(jH + 1).reduce((m, c) => c.low < m.low ? c : m);
+      add('pRes', H.high, H.time, lo.low, lo.time, true);
+      predMarks.push({ time: H.time, position: 'aboveBar', color: LV.pRes.color, shape: 'arrowDown', text: fmt(H.high) });
     }
-    // 預測支撐＝√(最新低點 × 它之後往右的最高點)；低點就在最後一根K 的話，用這根K 的最高點（之後出現更高點就跟著換）
-    if (iL >= 0) {
-      const L = piv[iL], after = slice.slice(L.idx + 1);
-      const hi = after.length ? after.reduce((m, c) => c.high > m.high ? c : m) : lastBar;
-      add('pSup', L.price, L.time, hi.high, hi.time, false);
+    // 預測支撐＝√(第一個轉折低點 × 它之後往右的最高點，至少是最新那根K 的最高點；之後有更高點就跟著換)
+    const jL = firstTurn(true);
+    if (jL >= 0) {
+      const L = slice[jL], hi = slice.slice(jL + 1).reduce((m, c) => c.high > m.high ? c : m);
+      add('pSup', L.low, L.time, hi.high, hi.time, false);
+      predMarks.push({ time: L.time, position: 'belowBar', color: LV.pSup.color, shape: 'arrowUp', text: fmt(L.low) });
     }
     // 前波支撐＝最新低點之前、已走完的那段上漲（低→高）
     if (iL >= 2 && piv[iL - 1].type === 'H' && piv[iL - 2].type === 'L') add('fSup', piv[iL - 2].price, piv[iL - 2].time, piv[iL - 1].price, piv[iL - 1].time, false);
@@ -658,7 +674,7 @@
     if (iH >= 2 && piv[iH - 1].type === 'L' && piv[iH - 2].type === 'H') add('fRes', piv[iH - 2].price, piv[iH - 2].time, piv[iH - 1].price, piv[iH - 1].time, true);
     levels.sort((a, b) => a.rank - b.rank);
     const used = piv.slice(Math.max(0, Math.min(iH, iL) - 2));
-    pivotMarkers = used.map(p => ({ time: p.time, position: p.type === 'H' ? 'aboveBar' : 'belowBar', color: p.type === 'H' ? '#ea3943' : '#16c784', shape: p.type === 'H' ? 'arrowDown' : 'arrowUp', text: fmt(p.price) + (p.live ? '（即時）' : '') }));
+    pivotMarkers = predMarks.concat(used.filter(p => !predMarks.some(m => m.time === p.time)).map(p => ({ time: p.time, position: p.type === 'H' ? 'aboveBar' : 'belowBar', color: p.type === 'H' ? '#ea3943' : '#16c784', shape: p.type === 'H' ? 'arrowDown' : 'arrowUp', text: fmt(p.price) + (p.live ? '（即時）' : '') })));
     setAllMarkers();
     drawLevels();
   }
