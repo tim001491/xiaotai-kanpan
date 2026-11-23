@@ -57,11 +57,18 @@
   details.help[open] > summary { color: #f0b90b; border-color: #f0b90b55; }
   details.help[open] > summary::after { content: '（收起）'; }
   details.help > p.hint:first-of-type { margin-top: 8px; }
+  .card.fold > h2 { cursor: pointer; margin: 0; user-select: none; display: flex; align-items: center; gap: 8px; }
+  .card.fold > h2::before { content: '▸'; color: #f0b90b; font-size: 14px; width: 12px; }
+  .card.fold.open > h2::before { content: '▾'; }
+  .card.fold > h2::after { content: '點開'; margin-left: auto; font-size: 11px; font-weight: 400; color: #5b6478; border: 1px solid #262b36; border-radius: 6px; padding: 1px 8px; white-space: nowrap; }
+  .card.fold.open > h2::after { content: '收起'; }
+  .card.fold > .card-body { display: none; margin-top: 10px; }
+  .card.fold.open > .card-body { display: block; }
 </style>
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v5</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v6</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -133,7 +140,7 @@
     </div>
 
     <div class="card">
-      <h2>小台模擬帳戶（虛擬資金，非真錢，多空都能做）</h2>
+      <h2>小台模擬帳戶（虛擬資金）</h2>
       <div class="kv" id="acct"></div>
       <div class="row" style="margin-top:10px">
         <label>每次下</label><input id="qty" type="number" min="1" value="1"><label>口</label>
@@ -236,6 +243,22 @@
   const API = '/api/mxf';
   const PV = 50, TAX = 0.00002, START_CASH = 500000, TW = 8 * 3600; // 小台 1 點 50 元；期交稅 十萬分之2；K棒時間用台灣時間
   const $ = id => document.getElementById(id);
+
+  // ---------- 功能區塊收合：按標題才展開，記住開關狀態 ----------
+  (() => {
+    let open = {}; try { open = JSON.parse(localStorage.getItem('mxf_open') || '{}'); } catch {}
+    document.querySelectorAll('main .card').forEach((card, i) => {
+      const h = card.querySelector(':scope > h2'); if (!h) return; // 開根號關鍵價位那塊標題在 row 裡，保持一直顯示
+      const key = h.textContent.trim().slice(0, 6) || 'c' + i;
+      const body = document.createElement('div'); body.className = 'card-body';
+      while (h.nextSibling) body.appendChild(h.nextSibling);
+      card.appendChild(body); card.classList.add('fold');
+      const set = v => { card.classList.toggle('open', v); open[key] = v; try { localStorage.setItem('mxf_open', JSON.stringify(open)); } catch {} };
+      card.classList.toggle('open', !!open[key]);
+      h.setAttribute('role', 'button');
+      h.onclick = () => set(!card.classList.contains('open'));
+    });
+  })();
 
   // ---------- storage ----------
   const store = {
