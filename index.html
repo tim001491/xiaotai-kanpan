@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v16</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v17</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -91,7 +91,7 @@
   <button id="soundBtn">🔔 開啟提醒音</button>
   <a href="https://tim-sqrt-trade.netlify.app/" style="color:#8b93a7;font-size:12px">幣安版 →</a>
   <div style="display:flex;gap:8px;width:100%">
-    <div id="lvBtns" style="display:flex;gap:8px;flex:1"></div>
+    <div id="lvBtns" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;flex:1"></div>
     <button id="lockBtn" title="鎖定／自動更新價位">🔓</button>
   </div>
 </header>
@@ -111,7 +111,7 @@
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
-      <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
+      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(最新高點 × 之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(最新低點 × 之後往右的最高點)，低點就在最新那根K 時用那根K 的最高點，之後有更高點就跟著換。預測的兩條是虛線，會跟著價格變。點明細可以在圖上看到是哪兩個點。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
@@ -129,9 +129,6 @@
           <option value="5" selected>中（左右 5 根）</option>
           <option value="10">低（左右 10 根）</option>
         </select>
-      </div>
-      <div class="row">
-        <label>由右往左換算</label><input id="count" type="number" min="1" max="10" value="2"><label>段</label>
       </div>
       <div class="row">
         <label>每</label><input id="poll" type="number" min="1" max="30" value="1"><label>秒抓一次報價</label>
@@ -269,7 +266,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
-  const SETTING_IDS = ['prod','interval','pastDays','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
+  const SETTING_IDS = ['prod','interval','pastDays','lookback','step','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
   const saved = store.get('mxf_settings', {});
   if (!saved.v10poll) { saved.poll = '1'; saved.v10poll = 1; store.set('mxf_settings', saved); } // 改成最快：每 1 秒
   SETTING_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; if ($(id).tagName === 'SELECT' && !$(id).value) $(id).selectedIndex = id === 'step' ? 1 : 0; });
@@ -531,10 +528,14 @@
   const fmt = (p, d) => p == null || isNaN(p) ? '--' : Number(p).toLocaleString('en-US', { minimumFractionDigits: d ?? 0, maximumFractionDigits: d ?? 0 });
 
   // ---------- square-root levels（跟幣安版同一套）----------
+  // 四條關鍵價位：前波（已走完的那一段）、預測（正在走的那一段，會跟著價格變）
   const LV = {
-    res: { label: '壓力／賣出參考', color: '#b26bff' },
-    sup: { label: '支撐／停損', color: '#ff9f1a' }
+    fRes: { label: '前波壓力', color: '#b26bff', dash: false },
+    fSup: { label: '前波支撐', color: '#ff9f1a', dash: false },
+    pRes: { label: '預測壓力', color: '#d8a8ff', dash: true },
+    pSup: { label: '預測支撐', color: '#ffc870', dash: true }
   };
+  const LV_ORDER = ['fRes', 'fSup', 'pRes', 'pSup'];
   function findPivots(slice, w) {
     let piv = [];
     for (let i = w; i < slice.length - 2; i++) {
@@ -609,21 +610,35 @@
     const n = Math.max(20, +$('lookback').value || 100);
     const slice = candles.slice(-n);
     const piv = findPivots(slice, +$('step').value || 5);
-    const cnt = Math.min(10, Math.max(1, +$('count').value || 4));
     levels = [];
-    const seen = {};
-    for (let i = piv.length - 2, rank = 1; i >= 0 && rank <= cnt; i--, rank++) {
-      const A = piv[i], B = piv[i + 1], kind = A.type === 'H' ? 'res' : 'sup';
-      levels.push({ kind, rank, primary: !seen[kind], price: Math.sqrt(A.price * B.price), a: A.price, b: B.price, aT: A.time, bT: B.time, aH: A.type === 'H', label: `${rank}. ${LV[kind].label}` });
-      seen[kind] = true;
+    const add = (kind, A, aT, B, bT, aH) => levels.push({ kind, rank: LV_ORDER.indexOf(kind) + 1, primary: true, price: Math.sqrt(A * B), a: A, b: B, aT, bT, aH, label: LV[kind].label });
+    const lastBar = slice.at(-1);
+    let iH = -1, iL = -1;
+    piv.forEach((p, i) => { if (p.type === 'H') iH = i; else iL = i; });
+    // 預測壓力＝√(最新高點 × 它之後往右的最低點)；高點就在最後一根K 的話，用這根K 的最低點
+    if (iH >= 0) {
+      const H = piv[iH], after = slice.slice(H.idx + 1);
+      const lo = after.length ? after.reduce((m, c) => c.low < m.low ? c : m) : lastBar;
+      add('pRes', H.price, H.time, lo.low, lo.time, true);
     }
-    const used = piv.slice(Math.max(0, piv.length - 1 - levels.length));
+    // 預測支撐＝√(最新低點 × 它之後往右的最高點)；低點就在最後一根K 的話，用這根K 的最高點（之後出現更高點就跟著換）
+    if (iL >= 0) {
+      const L = piv[iL], after = slice.slice(L.idx + 1);
+      const hi = after.length ? after.reduce((m, c) => c.high > m.high ? c : m) : lastBar;
+      add('pSup', L.price, L.time, hi.high, hi.time, false);
+    }
+    // 前波支撐＝最新低點之前、已走完的那段上漲（低→高）
+    if (iL >= 2 && piv[iL - 1].type === 'H' && piv[iL - 2].type === 'L') add('fSup', piv[iL - 2].price, piv[iL - 2].time, piv[iL - 1].price, piv[iL - 1].time, false);
+    // 前波壓力＝最新高點之前、已走完的那段下跌（高→低）
+    if (iH >= 2 && piv[iH - 1].type === 'L' && piv[iH - 2].type === 'H') add('fRes', piv[iH - 2].price, piv[iH - 2].time, piv[iH - 1].price, piv[iH - 1].time, true);
+    levels.sort((a, b) => a.rank - b.rank);
+    const used = piv.slice(Math.max(0, Math.min(iH, iL) - 2));
     pivotMarkers = used.map(p => ({ time: p.time, position: p.type === 'H' ? 'aboveBar' : 'belowBar', color: p.type === 'H' ? '#ea3943' : '#16c784', shape: p.type === 'H' ? 'arrowDown' : 'arrowUp', text: fmt(p.price) + (p.live ? '（即時）' : '') }));
     setAllMarkers();
     drawLevels();
   }
   let pivotMarkers = [], hlMarkers = [];
-  const setAllMarkers = () => series.setMarkers([...(showLv.res || showLv.sup ? pivotMarkers : []), ...hlMarkers].filter(m => candles.some(c => c.time === m.time)).sort((a, b) => a.time - b.time));
+  const setAllMarkers = () => series.setMarkers([...(LV_ORDER.some(k => showLv[k]) ? pivotMarkers : []), ...hlMarkers].filter(m => candles.some(c => c.time === m.time)).sort((a, b) => a.time - b.time));
 
   function jumpToLevel(rank) {
     const l = levels.find(x => x.rank === rank); if (!l) return;
@@ -643,13 +658,13 @@
 
   let lines = [];
   // 兩個按鈕：壓力、支撐，按了線才畫到圖上、明細才出現（提醒照樣會響）
-  let showLv = { res: false, sup: false };
-  try { Object.assign(showLv, JSON.parse(localStorage.getItem('mxf_showlv') || '{}')); } catch {}
+  let showLv = { fRes: false, fSup: false, pRes: false, pSup: false };
+  try { const o = JSON.parse(localStorage.getItem('mxf_showlv4') || '{}'); LV_ORDER.forEach(k => { if (o[k] != null) showLv[k] = !!o[k]; }); } catch {}
   function drawLevels() {
     const vis = levels.filter(l => showLv[l.kind]);
     while (lines.length > vis.length) series.removePriceLine(lines.pop());
     vis.forEach((l, i) => {
-      const opt = { price: l.price, color: LV[l.kind].color, lineWidth: l.primary ? 2 : 1, lineStyle: l.primary ? 0 : 2, axisLabelVisible: true, title: '' };
+      const opt = { price: l.price, color: LV[l.kind].color, lineWidth: 2, lineStyle: LV[l.kind].dash ? 2 : 0, axisLabelVisible: true, title: '' };
       if (lines[i]) lines[i].applyOptions(opt); else lines[i] = series.createPriceLine(opt);
     });
     renderLevels();
@@ -657,21 +672,21 @@
   function renderLevels() {
     const p = lastPrice;
     const btn = kind => {
-      const l = levels.find(x => x.kind === kind && x.primary), on = showLv[kind], col = LV[kind].color;
-      return `<button class="lvBtn" data-kind="${kind}" style="flex:1;border-color:${col};${on ? `background:${col};color:#111;font-weight:700` : `color:${col}`}">${kind === 'res' ? '壓力' : '支撐'}${l ? ' ' + fmt(l.price) : ''}</button>`;
+      const l = levels.find(x => x.kind === kind), on = showLv[kind], col = LV[kind].color;
+      return `<button class="lvBtn" data-kind="${kind}" style="border-color:${col};${LV[kind].dash ? 'border-style:dashed;' : ''}${on ? `background:${col};color:#111;font-weight:700` : `color:${col}`};padding:6px 4px">${LV[kind].label}<br><b>${l ? fmt(l.price) : '--'}</b></button>`;
     };
-    $('lvBtns').innerHTML = btn('res') + btn('sup');
+    $('lvBtns').innerHTML = LV_ORDER.map(btn).join('');
     const vis = levels.filter(l => showLv[l.kind]);
     $('levels').innerHTML = !levels.length ? `<div style="color:#8b93a7">${candles.length < 20 ? `K棒還在累積中（目前 ${candles.length} 根）` : '轉折點還不夠，請把「取最近 N 根K」調大或靈敏度調高'}</div>` : vis.map(l => {
       const dist = p ? `${l.price - p >= 0 ? '+' : ''}${(l.price - p).toFixed(0)} 點` : '';
-      return `<div data-rank="${l.rank}" style="cursor:pointer"><span style="color:${LV[l.kind].color};font-weight:${l.primary ? 700 : 400}">${l.label}</span><span>${fmt(l.price, 1)} <small style="color:#8b93a7">${dist}</small></span></div>
+      return `<div data-rank="${l.rank}" style="cursor:pointer"><span style="color:${LV[l.kind].color};font-weight:700">${l.label}</span><span>${fmt(l.price, 1)} <small style="color:#8b93a7">${dist}</small></span></div>
               <div data-rank="${l.rank}" style="border:0;color:#8b93a7;font-size:12px;cursor:pointer"><span>√(${fmt(l.a)} × ${fmt(l.b)})</span><span style="color:#5b6478">📍</span></div>`;
     }).join('');
   }
   $('lvBtns').addEventListener('click', e => {
     const b = e.target.closest('[data-kind]'); if (!b) return;
     showLv[b.dataset.kind] = !showLv[b.dataset.kind];
-    try { localStorage.setItem('mxf_showlv', JSON.stringify(showLv)); } catch {}
+    try { localStorage.setItem('mxf_showlv4', JSON.stringify(showLv)); } catch {}
     drawLevels();
     setAllMarkers();
   });
@@ -1148,7 +1163,7 @@
     $('price').textContent = '--'; $('price').style.color = ''; $('chg').textContent = '';
     load();
   };
-  ['lookback', 'step', 'count'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
+  ['lookback', 'step'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
   $('pastDays').onchange = () => { saveSettings(); loadPast().then(ch => { if (ch && !isDaily(mins())) rebuild(); }); };
   ['poll', 'qty', 'marginPer', 'feePer', 'reMult', 'sl', 'maxTrades', 'btInterval', 'btQty'].forEach(id => $(id).onchange = saveSettings);
   $('rootStop').onchange = () => { saveSettings(); drawStopLine(); };
