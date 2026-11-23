@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v15</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v16</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -112,7 +112,7 @@
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
       <p class="hint">由右往左，每兩個相鄰轉折點相乘開根號，程式自動分色：<b style="color:#b26bff">下跌段（高→低）＝紫線 壓力／賣出參考</b>，<b style="color:#ff9f1a">上漲段（低→高）＝橘線 支撐／停損</b>。實線＝最新一條，虛線＝更左邊的舊轉折。</p>
-    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；今天日盤進行中那根會跟著即時報價跑。換月時價格會有一點跳動（正價差／逆價差）。</p>
+    <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
 
@@ -398,11 +398,24 @@
   // 今天日盤進行中（或日盤收了但期交所資料還沒出來）：用即時報價補今天那根
   const dqKey = () => 'mxf_dayquote' + (isNext() ? '_next' : '');
   let dayQuote = store.get(dqKey(), null);
+  // 期交所日K 還沒出來的交易日（今天、今晚夜盤＝明天），用 1 分K 自己合成那一根，跟三竹一樣盤中就看得到
+  // 交易日：15:00 以後的夜盤算下一個交易日；週五晚上到週六凌晨算下週一
+  function tradeDateOf(t) {
+    const day = Math.floor(t / 86400) * 86400, m = (t - day) / 60;
+    let d = m >= 15 * 60 ? day + 86400 : day;
+    for (let i = 0; i < 3 && [0, 6].includes(new Date(d * 1000).getUTCDay()); i++) d += 86400;
+    return d;
+  }
   function withLiveDay(bars) {
-    if (isFull() || !dayQuote || !(dayQuote.open > 0)) return bars;
-    const last = bars.at(-1);
-    if (last && last.time >= dayQuote.time) return bars;
-    return [...bars, { time: dayQuote.time, open: dayQuote.open, high: dayQuote.high, low: dayQuote.low, close: dayQuote.close, volume: dayQuote.volume }];
+    const last = bars.at(-1)?.time || 0, src = viewBars(), add = new Map();
+    for (let i = src.length - 1; i >= 0; i--) {
+      const b = src[i]; if (b.time < last) break;
+      const td = tradeDateOf(b.time); if (td <= last) continue;
+      const x = add.get(td);
+      if (!x) add.set(td, { time: td, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume });
+      else { x.open = b.open; x.high = Math.max(x.high, b.high); x.low = Math.min(x.low, b.low); x.volume += b.volume; } // 由新往舊掃，open 最後會是最早那根
+    }
+    return add.size ? bars.concat([...add.values()].sort((a, b) => a.time - b.time)) : bars;
   }
 
   // ---------- chart ----------
@@ -691,7 +704,7 @@
     else if (b.time - t > 600) { bars1m = bars1m.filter(x => x.time <= t); barsDirty = true; rebuild(); return; } // 手機存到不合理的未來K棒，清掉
     else return; // 時間倒退就略過
     barsDirty = true;
-    if (isDaily(mins())) return;
+    if (isDaily(mins())) { liveDailySoon(); return; }
     const before = candles.length, lastT = candles.at(-1)?.time;
     const nt = bucketOf(t, mins());
     if (lastT === nt) {
@@ -746,7 +759,8 @@
     const tw = new Date(Date.now() + TW * 1000), nowS = tw.getUTCHours() * 3600 + tw.getUTCMinutes() * 60 + tw.getUTCSeconds();
     const qt = String(q.time || ''), qS = qt.length >= 4 ? +qt.slice(0, 2) * 3600 + +qt.slice(2, 4) * 60 + +(qt.slice(4, 6) || 0) : nowS;
     let lag = nowS - qS; if (lag < 0) lag += 86400;
-    quoteStale = lag > 60 && lag < 3 * 3600;
+    const nm = Math.floor(nowS / 60), closed = (nm >= 13 * 60 + 46 && nm < 15 * 60) || (nm >= 5 * 60 + 1 && nm < 8 * 60 + 45);
+    quoteStale = !closed && lag > 60 && lag < 3 * 3600; // 收盤休息時間報價本來就不動，不算慢
     if (quoteStale) { $('conn').textContent += `（報價表慢 ${Math.round(lag / 60)} 分，改用1分K的價）`; histAt = 0; } // 報價表慢就馬上改抓1分K
     let dv = 0, changed = false;
     if (baseSym === q.sym && baseVol != null) {
@@ -755,19 +769,18 @@
     }
     baseSym = q.sym; baseVol = v; lastQ = q;
     if (changed && !quoteStale) addTick(p, dv, Math.floor((q.serverTime || Date.now()) / 1000));
-    if (q.mt === '0' && q.open > 0) {
-      const d = new Date((q.serverTime || Date.now()) + TW * 1000);
-      dayQuote = { time: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 1000, open: q.open, high: Math.max(q.high || p, p), low: Math.min(q.low || p, p), close: p, volume: v };
-      store.set(dqKey(), dayQuote);
-      if (isDaily(mins()) && !isFull() && candles.length && daily[dayModeKey()]) updateLiveDaily();
-    }
+    if (isDaily(mins())) liveDailySoon();
     if (!quoteStale) { onPrice(p); showChg(p, q.ref); }
     syncHistory(q.sym !== histSym); histSym = q.sym;
   }
+  let liveT = 0;
+  function liveDailySoon() { if (!liveT) liveT = setTimeout(() => { liveT = 0; if (isDaily(mins()) && daily[dayModeKey()]) updateLiveDaily(); }, 1500); }
   function updateLiveDaily() {
     const m = mins(), arr = agg(withLiveDay(daily[dayModeKey()].bars), m), before = candles.length;
+    if (!arr.length) return;
     candles = arr;
-    series.update(candles.at(-1)); updateSubData();
+    if (Math.abs(candles.length - before) > 1) { series.setData(candles); setSubData(); }
+    else { series.update(candles.at(-1)); updateSubData(); }
     if (candles.length !== before) { setTimeout(calcVolMarks); setTimeout(checkReentry); }
     if (!locked) calcLevels();
   }
@@ -788,7 +801,7 @@
       bars1m = bars1m.filter(b => b.time < from).concat(rows, keepAfter);
       if (bars1m.length > 6000) bars1m.splice(0, bars1m.length - 6000);
       barsDirty = true; saveBars();
-      if (!isDaily(mins())) rebuild();
+      if (!isDaily(mins())) rebuild(); else liveDailySoon();
     } catch {} finally { histBusy = false; }
   }
   // 兩個來源（報價表、1分K）哪個比較新就用哪個的成交價
@@ -847,7 +860,7 @@
     rebuild();
     setConn(false, '連線期交所…');
     poll(my);
-    loadPast().then(ch => { if (ch && my === gen && !isDaily(mins())) rebuild(); });
+    loadPast().then(ch => { if (ch && my === gen) isDaily(mins()) ? liveDailySoon() : rebuild(); });
   }
   function setConn(live, text) { $('dot').className = 'dot' + (live ? ' live' : ''); $('conn').textContent = text; }
   function showPrice() { $('price').textContent = fmt(lastPrice); }
