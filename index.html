@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v10</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v11</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -134,7 +134,7 @@
         <label>由右往左換算</label><input id="count" type="number" min="1" max="10" value="2"><label>段</label>
       </div>
       <div class="row">
-        <label>每</label><input id="poll" type="number" min="2" max="30" value="3"><label>秒抓一次報價</label>
+        <label>每</label><input id="poll" type="number" min="1" max="30" value="1"><label>秒抓一次報價</label>
       </div>
     </div>
 
@@ -266,8 +266,9 @@
   };
   const SETTING_IDS = ['prod','interval','lookback','step','count','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
   const saved = store.get('mxf_settings', {});
+  if (!saved.v10poll) { saved.poll = '1'; saved.v10poll = 1; store.set('mxf_settings', saved); } // 改成最快：每 1 秒
   SETTING_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; if ($(id).tagName === 'SELECT' && !$(id).value) $(id).selectedIndex = id === 'step' ? 1 : 0; });
-  const saveSettings = () => store.set('mxf_settings', Object.fromEntries(SETTING_IDS.map(id => [id, $(id).value])));
+  const saveSettings = () => store.set('mxf_settings', { ...Object.fromEntries(SETTING_IDS.map(id => [id, $(id).value])), v10poll: 1 });
 
   let acct = store.get('mxf_acct', null) || newAcct();
   function newAcct() { return { cash: START_CASH, side: null, qty: 0, entry: 0, margin: 0, openFee: 0, realized: 0, wins: 0, losses: 0, day: today(), dayEntries: 0, log: [] }; }
@@ -663,6 +664,7 @@
   function restartPoll() { const my = ++gen; clearTimeout(pollTimer); poll(my); }
   async function poll(my) {
     if (my !== gen) return;
+    if (document.hidden) { pollTimer = setTimeout(() => poll(my), 5000); return; } // 網頁不在前面就先不抓，省流量
     try {
       const mt = isFull() ? '' : '&mt=0';
       const r = await fetchT(`${API}?a=quote&c=${isNext() ? 'next' : 'near'}${mt}&_=${Date.now()}`);
@@ -673,7 +675,7 @@
       if (!q.ok) { setConn(false, q.error || '抓不到報價'); }
       else onQuote(q);
     } catch (e) { setConn(false, '連線失敗：' + e.message); }
-    if (my === gen) pollTimer = setTimeout(() => poll(my), Math.max(2, +$('poll').value || 3) * 1000);
+    if (my === gen) pollTimer = setTimeout(() => poll(my), Math.max(1, +$('poll').value || 1) * 1000);
   }
   function onQuote(q) {
     const p = q.price, v = q.vol;
@@ -714,7 +716,7 @@
   let histBusy = false, histAt = 0;
   async function syncHistory(force) {
     const sym = lastQ?.sym;
-    if (!sym || histBusy || (!force && Date.now() - histAt < 10000)) return;
+    if (!sym || histBusy || (!force && Date.now() - histAt < 5000)) return;
     histBusy = true; histAt = Date.now();
     try {
       const r = await fetchT(`${API}?a=hist&sym=${encodeURIComponent(sym)}&_=${Date.now()}`, 8000);
