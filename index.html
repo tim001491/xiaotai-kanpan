@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v17</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v18</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -111,7 +111,7 @@
     <div class="sub"><div class="tag" id="volTag">成交量（口）</div><div id="volChart"></div><div class="vlayer" id="vlVol"></div></div>
     <div class="sub"><div class="tag" id="macdTag">MACD (12,26,9)</div><div id="macdChart"></div><div class="vlayer" id="vlMacd"></div></div>
     <details class="help"><summary>ℹ️ 說明</summary>
-      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(最新高點 × 之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(最新低點 × 之後往右的最高點)，低點就在最新那根K 時用那根K 的最高點，之後有更高點就跟著換。預測的兩條是虛線，會跟著價格變。點明細可以在圖上看到是哪兩個點。</p>
+      <p class="hint">關鍵價位＝兩個轉折點相乘開根號 √(A×B)，由最新一根往左找轉折。<b style="color:#b26bff">前波壓力</b>＝上一段已走完的下跌（高→低）；<b style="color:#ff9f1a">前波支撐</b>＝上一段已走完的上漲（低→高）。<b style="color:#d8a8ff">預測壓力</b>＝√(最新高點 × 之後往右的最低點)；<b style="color:#ffc870">預測支撐</b>＝√(最新低點 × 之後往右的最高點)，低點就在最新那根K 時用那根K 的最高點，之後有更高點就跟著換。預測的兩條是實線，會跟著價格變；前波的兩條是虛線。點明細可以在圖上看到是哪兩個點。</p>
     <p class="hint">📌 商品跟三竹一樣：<b>近全／次全＝日盤＋夜盤</b>，<b>近月／次月＝只看日盤</b>；近＝最近到期的月合約，次＝下一個月。<br>K線怎麼來：分K 直接用期交所的 1 分K（這一盤從開盤到現在），每 20 秒同步一次，中間用即時報價先畫。之前幾天的分K 用期交所公布的每筆成交資料整理（GitHub 每天 17:10、06:00 自動更新，最多保留期交所給的 30 個交易日，之後一直累積）。報價可能比看盤軟體慢幾秒。<br>📅 日／週／月K 用的是期交所每天收盤後公布的資料（期交所「期貨每日交易行情」，GitHub 每天自動整理，最近 5 年起、每天取近月或次月合約），所以不用等累積；期交所還沒公布的今天（和今晚夜盤）那根，會用 1 分K 自己合成，盤中就看得到，跟三竹一樣。換月時價格會有一點跳動（正價差／逆價差）。</p>
     </details>
 </div>
@@ -530,10 +530,10 @@
   // ---------- square-root levels（跟幣安版同一套）----------
   // 四條關鍵價位：前波（已走完的那一段）、預測（正在走的那一段，會跟著價格變）
   const LV = {
-    fRes: { label: '前波壓力', color: '#b26bff', dash: false },
-    fSup: { label: '前波支撐', color: '#ff9f1a', dash: false },
-    pRes: { label: '預測壓力', color: '#d8a8ff', dash: true },
-    pSup: { label: '預測支撐', color: '#ffc870', dash: true }
+    fRes: { label: '前波壓力', color: '#b26bff', dash: true },
+    fSup: { label: '前波支撐', color: '#ff9f1a', dash: true },
+    pRes: { label: '預測壓力', color: '#d8a8ff', dash: false },
+    pSup: { label: '預測支撐', color: '#ffc870', dash: false }
   };
   const LV_ORDER = ['fRes', 'fSup', 'pRes', 'pSup'];
   function findPivots(slice, w) {
