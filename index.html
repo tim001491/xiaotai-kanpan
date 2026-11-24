@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v27</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v28</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -158,8 +158,14 @@
         <button id="closeBtn">平倉</button>
         <button id="resetBtn">重設帳戶</button>
       </div>
+      <div class="row" style="margin-top:6px">
+        <button id="autoBtn" style="flex:1;font-weight:700">🤖 自動交易：關</button>
+      </div>
+      <div class="row">
+        <label>自動交易：當天虧損超過</label><input id="autoLoss" type="number" min="0" step="1000" value="30000"><label>元就停（連續停損 3 次也停）</label>
+      </div>
       <details class="help"><summary>ℹ️ 說明</summary>
-        <p class="hint">小台 1 點＝50 元。保證金期交所常調整，請照你期貨商公告的數字改。</p>
+        <p class="hint">🤖 自動交易用 5 分K：紅K 突破前波壓力、收在 MA60 之上就做多；綠K 跌破前波支撐、收在 MA60 之下就做空；停損是進場時的前波支撐（空單看壓力），每根 5 分K 收盤往有利方向移；反向訊號就平倉或反手。用的是模擬帳戶的虛擬資金，網頁要開著才會跑（手機切走會暫停）。<br>小台 1 點＝50 元。保證金期交所常調整，請照你期貨商公告的數字改。</p>
       </details>
 </div>
 
@@ -268,7 +274,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
   };
-  const SETTING_IDS = ['prod','interval','pastDays','lookback','step','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
+  const SETTING_IDS = ['prod','interval','pastDays','autoLoss','lookback','step','poll','qty','marginPer','feePer','rootStop','reMult','vmK','vmAvg','armPct','sl','maxTrades','btInterval','btQty'];
   const saved = store.get('mxf_settings', {});
   if (!saved.v10poll) { saved.poll = '1'; saved.v10poll = 1; store.set('mxf_settings', saved); } // 改成最快：每 1 秒
   SETTING_IDS.forEach(id => { if (saved[id] != null) $(id).value = saved[id]; if ($(id).tagName === 'SELECT' && !$(id).value) $(id).selectedIndex = id === 'step' ? 1 : 0; });
@@ -1002,6 +1008,12 @@
   }
   let stopLine = null;
   function drawStopLine() {
+    if (acct.side && acct.byStrat) {
+      if (!acct.sStop) { if (stopLine) { series.removePriceLine(stopLine); stopLine = null; } return; }
+      const opt = { price: acct.sStop, color: '#ffffff', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '🤖 停損' };
+      if (stopLine) stopLine.applyOptions(opt); else stopLine = series.createPriceLine(opt);
+      return;
+    }
     const on = acct.side && acct.ref && $('rootStop').value === 'on';
     if (!on) { if (stopLine) { series.removePriceLine(stopLine); stopLine = null; } return; }
     const px = curStop();
@@ -1010,7 +1022,7 @@
   }
 
   // ---------- 小台模擬交易 ----------
-  function rollDay() { if (acct.day !== today()) { acct.day = today(); acct.dayEntries = 0; } }
+  function rollDay() { if (acct.day !== today()) { acct.day = today(); acct.dayEntries = 0; acct.dayStops = 0; acct.dayPnl = 0; } }
   const SIDE = { long: '多單', short: '空單' };
   const costPer = p => (Math.max(0, +$('feePer').value || 0)) + Math.round(p * PV * TAX); // 每口單邊：手續費＋期交稅
   function unrealOf(p) { return acct.side ? (p - acct.entry) * PV * acct.qty * (acct.side === 'long' ? 1 : -1) : 0; }
@@ -1027,7 +1039,7 @@
     acct.side = side; acct.qty = q; acct.entry = lastPrice; acct.margin = q * mPer; acct.openFee = q * c;
     acct.cash -= acct.margin + acct.openFee; acct.dayEntries++;
     acct.afterStop = false;
-    acct.ref = candles.length > 3 ? swingRef(candles, candles.length - 1, side) : null; acct.ext = lastPrice;
+    acct.ref = !reason.startsWith('🤖') && candles.length > 3 ? swingRef(candles, candles.length - 1, side) : null; acct.ext = lastPrice;
     addLog(`${side === 'long' ? '🔴 做多' : '🟢 做空'} 小台 ${q} 口 @ ${fmt(lastPrice)}（${reason}）` + (acct.ref ? `，前波${side === 'long' ? '低' : '高'}點 ${fmt(acct.ref)}，停損 ${fmt(curStop(), 1)}` : ''));
     saveAcct(); renderAcct(); drawStopLine();
   }
@@ -1037,12 +1049,24 @@
     const net = gross - fee - acct.openFee;
     acct.cash += acct.margin + gross - fee; acct.realized += net; net >= 0 ? acct.wins++ : acct.losses++;
     addLog(`⬜ 平${SIDE[acct.side]} ${acct.qty} 口 @ ${fmt(p)}（${pts >= 0 ? '+' : ''}${fmt(pts)} 點），損益 <b class="${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : ''}${fmt(net)} 元</b>（${reason}）`);
-    Object.assign(acct, { side: null, qty: 0, entry: 0, margin: 0, openFee: 0, ref: null, ext: null });
+    Object.assign(acct, { side: null, qty: 0, entry: 0, margin: 0, openFee: 0, ref: null, ext: null, sStop: null, byStrat: false });
+    if (acct.auto) { acct.dayPnl = (acct.dayPnl || 0) + net; }
     saveAcct(); renderAcct(); drawStopLine();
+    return net;
   }
   function checkStops(p) {
     if (!acct.side) return;
     if (unrealOf(p) <= -acct.margin * 0.75) { closePos('風險指標低於 25%，強制平倉'); return alertUser('💥 保證金不足，已強制平倉（模擬）'); }
+    if (acct.byStrat) { // 自動交易的單：用策略自己的停損（前波支撐／壓力，移動停損）
+      const long = acct.side === 'long';
+      if (acct.sStop && (long ? p <= acct.sStop : p >= acct.sStop)) {
+        const net = closePos(`🤖 策略停損：${long ? '跌破前波支撐' : '漲破前波壓力'} ${fmt(acct.sStop, 1)}`);
+        acct.dayStops = (acct.dayStops || 0) + 1; saveAcct();
+        alertUser(`🤖 自動交易停損 ${net >= 0 ? '+' : ''}${fmt(net)} 元`);
+        stratLimits();
+      }
+      return;
+    }
     if (acct.ref && $('rootStop').value === 'on') {
       const long = acct.side === 'long';
       if (long ? p > acct.ext : p < acct.ext) { acct.ext = p; saveAcct(); }
@@ -1053,12 +1077,79 @@
     const move = (p - acct.entry) * (acct.side === 'long' ? 1 : -1), sl = +$('sl').value;
     if (sl > 0 && move <= -sl) { closePos(`保險停損 ${move} 點`); alertUser('⛔ 觸發保險停損'); }
   }
+  // ---------- 🤖 自動交易：前波突破＋MA60 順勢＋移動停損（5 分K）----------
+  // 做多：紅K 最高價突破前波壓力（上一根沒碰到）、收盤在 MA60 之上 → 下一根開盤（＝現在的價格）買進
+  // 做空：綠K 最低價跌破前波支撐、收盤在 MA60 之下 → 放空
+  // 停損：進場時的前波支撐（空單：壓力），每根 5 分K 收盤往有利方向移；反向訊號就平倉／反手
+  // 風控：當天連續停損 3 次、或當天虧損超過上限 → 今天停止自動進場
+  let stratLastT = 0;
+  function lvAt(bars, idx) {
+    const sl = bars.slice(Math.max(0, idx + 1 - Math.max(20, +$('lookback').value || 100)), idx + 1);
+    const piv = findPivots(sl, +$('step').value || 5);
+    let iH = -1, iL = -1; piv.forEach((p, k) => { if (p.type === 'H') iH = k; else iL = k; });
+    return {
+      fSup: iL >= 2 && piv[iL - 1].type === 'H' && piv[iL - 2].type === 'L' ? Math.sqrt(piv[iL - 2].price * piv[iL - 1].price) : null,
+      fRes: iH >= 2 && piv[iH - 1].type === 'L' && piv[iH - 2].type === 'H' ? Math.sqrt(piv[iH - 2].price * piv[iH - 1].price) : null
+    };
+  }
+  function stratLimits() {
+    const lim = Math.max(0, +$('autoLoss').value || 30000);
+    if (!acct.stratOff && ((acct.dayStops || 0) >= 3 || (lim && (acct.dayPnl || 0) <= -lim))) {
+      acct.stratOff = acct.day; saveAcct();
+      alertUser(`🤖 今天${(acct.dayStops || 0) >= 3 ? '連續停損 3 次' : '虧損超過 ' + fmt(lim) + ' 元'}，自動交易今天暫停（明天自動恢復）`);
+    }
+  }
+  function stratTick() {
+    if (!acct.auto || !lastPrice) return;
+    if (acct.day !== today()) { rollDay(); }
+    if (acct.stratOff && acct.stratOff !== acct.day) { acct.stratOff = null; acct.dayStops = 0; acct.dayPnl = 0; saveAcct(); }
+    const bars = agg(viewBars(), 5);
+    if (bars.length < 70) return;
+    const nowTW = Date.now() / 1000 + TW;
+    let i = bars.length - 1;
+    if (nowTW < bars[i].time + 300) i--;           // 最後一根還沒走完，用前一根（已收盤）
+    const b = bars[i], p = bars[i - 1];
+    if (!b || b.time === stratLastT) return;
+    stratLastT = b.time;
+    if (nowTW - (b.time + 300) > 180) return;      // 太舊的K棒（網頁剛打開、或休市）不拿來下單
+    const lvPrev = lvAt(bars, i - 1), lvNow = lvAt(bars, i);
+    let ma = 0; for (let j = i - 59; j <= i; j++) ma += bars[j].close; ma /= 60;
+    const isRed = b.close >= b.open;
+    // 移動停損：只往有利方向移
+    if (acct.side && acct.byStrat) {
+      if (acct.side === 'long' && lvNow.fSup && lvNow.fSup < b.close && (!acct.sStop || lvNow.fSup > acct.sStop)) { acct.sStop = lvNow.fSup; addLog(`🤖 多單停損上移到 ${fmt(acct.sStop, 1)}`); }
+      if (acct.side === 'short' && lvNow.fRes && lvNow.fRes > b.close && (!acct.sStop || lvNow.fRes < acct.sStop)) { acct.sStop = lvNow.fRes; addLog(`🤖 空單停損下移到 ${fmt(acct.sStop, 1)}`); }
+      saveAcct(); drawStopLine();
+    }
+    let sig = null;
+    if (lvPrev.fRes && isRed && b.high > lvPrev.fRes && p.high <= lvPrev.fRes) sig = { side: 'long', why: `紅K 突破前波壓力 ${fmt(lvPrev.fRes, 1)}`, ok: b.close > ma, stop: lvPrev.fSup };
+    if (lvPrev.fSup && !isRed && b.low < lvPrev.fSup && p.low >= lvPrev.fSup) sig = { side: 'short', why: `綠K 跌破前波支撐 ${fmt(lvPrev.fSup, 1)}`, ok: b.close < ma, stop: lvPrev.fRes };
+    if (!sig) return;
+    if (!sig.ok) { // 逆勢：不進場，但手上反向的單要出場
+      if (acct.side && acct.byStrat && acct.side !== sig.side) closePos(`🤖 反向訊號（${sig.why}）`);
+      return addLog(`🤖 ${sig.why}，但收盤在 MA60 ${sig.side === 'long' ? '之下' : '之上'}（逆勢），不進場`);
+    }
+    if (acct.side === sig.side) return;
+    if (acct.stratOff === acct.day) { if (acct.side && acct.byStrat) closePos(`🤖 反向訊號（${sig.why}）`); return addLog(`🤖 ${sig.why}，今天自動交易已暫停`); }
+    if (acct.side && !acct.byStrat) return addLog(`🤖 ${sig.why}，但你手上有手動的單，自動交易不動它`);
+    openPos(sig.side, '🤖 ' + sig.why + '＋MA60 順勢');
+    if (acct.side === sig.side) {
+      const okStop = sig.stop && (sig.side === 'long' ? sig.stop < lastPrice : sig.stop > lastPrice);
+      Object.assign(acct, { byStrat: true, sStop: okStop ? sig.stop : null, ref: null, ext: null });
+      addLog(`🤖 停損 ${acct.sStop ? fmt(acct.sStop, 1) : '（暫無，等下一根）'}`);
+      alertUser(`🤖 自動${sig.side === 'long' ? '做多' : '做空'} @ ${fmt(lastPrice)}`);
+      saveAcct(); renderAcct(); drawStopLine();
+    }
+  }
+  setInterval(stratTick, 2000);
   function renderAcct() {
     const unreal = acct.side ? unrealOf(lastPrice) : 0;
     const total = acct.cash + acct.margin + unreal, ret = (total - START_CASH) / START_CASH * 100;
     const trades = acct.wins + acct.losses;
     const c = v => v > 0 ? 'pos' : v < 0 ? 'neg' : '';
-    $('acct').innerHTML = `
+    $('autoBtn').textContent = acct.auto ? (acct.stratOff === acct.day ? '🤖 自動交易：今天暫停' : '🤖 自動交易：開') : '🤖 自動交易：關';
+    $('autoBtn').classList.toggle('on', !!acct.auto);
+    $('acct').innerHTML = `${acct.side && acct.byStrat ? `<span>自動停損</span><span>${acct.sStop ? fmt(acct.sStop, 1) : '--'}</span>` : ''}
       <span>權益數</span><span class="${c(ret)}">${fmt(total)}（${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%）</span>
       <span>可用資金</span><span>${fmt(acct.cash)}</span>
       <span>持倉</span><span>${acct.side ? `<b class="${acct.side === 'long' ? 'pos' : 'neg'}">${SIDE[acct.side]}</b> ${acct.qty} 口 @ ${fmt(acct.entry)}` : '無'}</span>
@@ -1221,6 +1312,12 @@
     $('lockBtn').classList.toggle('on', locked);
     if (!locked) calcLevels();
   };
+  $('autoBtn').onclick = () => {
+    acct.auto = !acct.auto; stratLastT = 0;
+    if (acct.auto) { acct.stratOff = null; acct.dayStops = 0; acct.dayPnl = 0; }
+    saveAcct(); renderAcct();
+    addLog(acct.auto ? '🤖 自動交易開啟：5分K 前波突破＋MA60 順勢＋移動停損（網頁要開著才會跑）' : '🤖 自動交易關閉（手上的單不會自動平，要自己決定）');
+  };
   $('buyBtn').onclick = () => openPos('long', '手動');
   $('sellBtn').onclick = () => openPos('short', '手動');
   $('closeBtn').onclick = () => closePos('手動');
@@ -1240,7 +1337,7 @@
   };
   ['lookback', 'step'].forEach(id => $(id).onchange = () => { saveSettings(); calcLevels(); });
   $('pastDays').onchange = () => { saveSettings(); loadPast().then(ch => { if (ch && !isDaily(mins())) rebuild(); }); };
-  ['poll', 'qty', 'marginPer', 'feePer', 'reMult', 'sl', 'maxTrades', 'btInterval', 'btQty'].forEach(id => $(id).onchange = saveSettings);
+  ['autoLoss', 'poll', 'qty', 'marginPer', 'feePer', 'reMult', 'sl', 'maxTrades', 'btInterval', 'btQty'].forEach(id => $(id).onchange = saveSettings);
   $('rootStop').onchange = () => { saveSettings(); drawStopLine(); };
   ['vmK', 'vmAvg', 'armPct'].forEach(id => $(id).onchange = () => { saveSettings(); calcVolMarks(); drawStopLine(); });
   const setVM = P => { Object.entries(P).forEach(([k, v]) => $(k).value = v); saveSettings(); calcVolMarks(); drawStopLine(); };
