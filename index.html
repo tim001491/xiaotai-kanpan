@@ -69,7 +69,7 @@
 </head>
 <body>
 <header>
-  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v28</small></h1>
+  <h1>小台開根號盯盤・模擬交易 <small style="font-size:12px;color:#8b93a7">v29</small></h1>
   <select id="prod">
     <option value="nearAll" selected>小台近全</option>
     <option value="nearDay">小台近月</option>
@@ -458,8 +458,8 @@
     handleScroll: TOUCH_SCROLL, handleScale: TOUCH_SCALE
   });
   // 均線：5、10、20（跟三竹一樣）
-  const MA_DEF = [[5, '#ffd54f'], [10, '#4dd0e1'], [20, '#ec6fcf']];
-  const maSeries = MA_DEF.map(([n, color]) => chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }));
+  const MA_DEF = [[5, '#ffd54f'], [10, '#4dd0e1'], [20, '#ec6fcf'], [60, '#cfd8dc']]; // MA60（淺灰、粗一點）＝自動交易的順勢線
+  const maSeries = MA_DEF.map(([n, color]) => chart.addLineSeries({ color, lineWidth: n === 60 ? 2 : 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }));
   const volChart = LWC.createChart($('volChart'), subOpts(false));
   const volSeries = volChart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: true });
   const VMA_DEF = [[5, '#ffd54f'], [10, '#4dd0e1']];
